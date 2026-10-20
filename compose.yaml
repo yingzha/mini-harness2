@@ -1,0 +1,19 @@
+# Usage:
+#   docker compose build
+#   docker compose run --rm app                                   # offline test suite
+#   docker compose run --rm app uv run --frozen python -m steps.s00_llm --live
+services:
+  app:
+    build: .
+    env_file:
+      - path: .env          # holds ANTHROPIC_API_KEY; never copied into the image
+        required: false     # tests and offline demos run without it
+    volumes:
+      # Source is read-only: code the model writes during rollouts can't edit the lessons.
+      - .:/app:ro
+      # Hide the key file from code the model writes (the SDK gets the key via env_file).
+      - /dev/null:/app/.env:ro
+      # Only the data the pipeline produces is writable.
+      - ./tasks:/app/tasks
+      - ./runs:/app/runs
+      - ./library:/app/library

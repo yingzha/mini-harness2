@@ -1,0 +1,15 @@
+# Secrets: never commit. Only the empty template is tracked.
+.env
+.env.*
+!.env.example
+
+# Local environments and caches
+.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+
+# Generated at run time (rollout workspaces can hold anything the model wrote)
+runs/
+library/
+tasks/

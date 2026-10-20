@@ -1,0 +1,19 @@
+[project]
+name = "mini-harness2"
+version = "0.1.0"
+description = "A from-scratch, lesson-by-lesson mini implementation of Harness² (arXiv 2610.14224)"
+requires-python = ">=3.14"
+dependencies = [
+    "anthropic>=1.15.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# Source is mounted read-only in Docker, so pytest must not write a cache dir.
+addopts = "-p no:cacheprovider"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

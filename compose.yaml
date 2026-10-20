@@ -1,19 +1,33 @@
 # Usage:
 #   docker compose build
 #   docker compose run --rm app                                   # offline test suite
-#   docker compose run --rm app uv run --frozen python -m steps.s00_llm --live
+#   docker compose run --rm app uv run --frozen python -m demos.d00_llm --live
 services:
   app:
     build: .
+    image: mini-harness2    # sandboxes run this image too (config.SANDBOX)
     env_file:
       - path: .env          # holds ANTHROPIC_API_KEY; never copied into the image
         required: false     # tests and offline demos run without it
+    environment:
+      # Temporary folders go on the scratch volume, which sandboxes can be given.
+      TMPDIR: /scratch
+    # The Docker socket belongs to group 0 on Docker Desktop. On a Linux host, use
+    # the id of its docker group instead (stat -c %g /var/run/docker.sock).
+    group_add: ["0"]
     volumes:
-      # Source is read-only: code the model writes during rollouts can't edit the lessons.
+      # Source is read-only: nothing that runs here can edit the lessons.
       - .:/app:ro
-      # Hide the key file from code the model writes (the SDK gets the key via env_file).
+      # Hide the key file (the SDK gets the key via env_file).
       - /dev/null:/app/.env:ro
       # Only the data the pipeline produces is writable.
       - ./tasks:/app/tasks
       - ./runs:/app/runs
       - ./library:/app/library
+      - scratch:/scratch
+      # Lets our code start sandbox containers. Whoever can use this socket controls
+      # Docker, which is why model-written code never runs in this container.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  scratch:

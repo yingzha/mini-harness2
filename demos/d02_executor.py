@@ -12,7 +12,7 @@ import time
 import config
 from steps.s00_llm import LLM
 from steps.s01_harness import Harness, load_harness
-from steps.s02_executor import execute, render_record
+from steps.s02_executor import Sandbox, execute, render_record
 
 TASK = (
     "Compute total revenue per region from source/sales.csv. Each order counts once. "
@@ -74,9 +74,10 @@ h0, _ = load_harness(config.BASE_HARNESS_DIR)
 harnesses = {"base": h0, "example": Harness({**h0.files, **EXAMPLE_FILES})}
 
 llm = LLM.from_env(config.LLM_SETTINGS)
+sandbox = Sandbox.from_docker(config.SANDBOX)
 print(f"Task: {TASK}\n\nExpected (worked out by hand):\n{EXPECTED}")
 for label, harness in harnesses.items():
-    record = execute(llm, harness, TASK, source, run_dir / label, config.ROLLOUT_LIMITS, label=label)
+    record = execute(llm, sandbox, harness, TASK, source, run_dir / label, config.ROLLOUT_LIMITS, label=label)
     (run_dir / f"{label}.md").write_text(render_record(record))
     used = sorted({c.name for s in record.steps for c in s.calls})
     print(f"=== {label} harness: {record.stop_reason}, {record.turns} turns, "

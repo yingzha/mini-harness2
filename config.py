@@ -51,6 +51,15 @@ class RolloutLimits:
     tool_timeout_s: float     # per run_python call or plugin hook
 
 
+@dataclass(frozen=True)
+class SandboxSettings:
+    """The container each piece of model-written code runs in."""
+    image: str        # the image compose builds (`image:` in compose.yaml); never downloaded
+    user: str         # an unprivileged user in that image
+    memory: str       # per call, e.g. "512m"
+    pids_limit: int   # processes per call
+
+
 # ---------------------------------------------------------------------------
 # Models and roles (paper §3.1 / §D.2)
 #
@@ -89,6 +98,11 @@ LLM_SETTINGS = LLMSettings(
 # Rollout limits (§D.1 caps each rollout at 200 model turns; we go smaller)
 # ---------------------------------------------------------------------------
 ROLLOUT_LIMITS = RolloutLimits(max_turns=40, subagent_max_turns=20, tool_timeout_s=60)
+
+# ---------------------------------------------------------------------------
+# Sandbox for model-written code: a fresh container per call (see s02)
+# ---------------------------------------------------------------------------
+SANDBOX = SandboxSettings(image="mini-harness2", user="app", memory="512m", pids_limit=128)
 
 # ---------------------------------------------------------------------------
 # Paths

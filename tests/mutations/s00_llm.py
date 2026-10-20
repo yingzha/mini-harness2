@@ -1,6 +1,6 @@
 """Bugs to plant in steps/s00_llm.py, each with the test that must catch it.
 
-Run with: python tools/mutate.py tests/mutations/s00_llm.py
+Run with: python -m tools.mutate tests/mutations/s00_llm.py
 A control (expect=None) changes nothing observable, so no test may fail for it.
 """
 

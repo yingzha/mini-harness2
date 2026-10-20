@@ -1,6 +1,6 @@
 """Bugs to plant in the offline demos, each with the test that must catch it.
 
-Run with: python tools/mutate.py tests/mutations/demos.py
+Run with: python -m tools.mutate tests/mutations/demos.py
 They model a refactor elsewhere that a demo depends on but no library test covers.
 """
 

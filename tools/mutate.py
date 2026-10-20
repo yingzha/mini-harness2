@@ -5,8 +5,8 @@ copy of the project; the test suite runs in that copy, and the bug's expected
 test must fail. A *control* (expect=None) is a change that keeps behaviour the
 same, so no test may fail for it. The real project is never modified.
 
-    python tools/mutate.py                                   # every bug list
-    python tools/mutate.py tests/mutations/s01_harness.py    # one list
+    python -m tools.mutate                                   # every bug list
+    python -m tools.mutate tests/mutations/s01_harness.py    # one list
 
 Exits non-zero if any bug goes uncaught, a control breaks a test, a bug no
 longer applies to the current code, or the unmodified copy fails its tests.
@@ -20,6 +20,8 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from steps.s02_executor import SANDBOX_LABEL
 
 ROOT = Path(__file__).resolve().parent.parent
 _NOT_COPIED = shutil.ignore_patterns(".git", ".venv", ".env", "runs", "library", "tasks",
@@ -73,4 +75,11 @@ with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
             all_ok &= ok
             print(line)
 print("\nAll planted bugs were caught by their expected tests." if all_ok else "\nSome checks FAILED (see above).")
+
+# A planted bug that stops sandbox containers being removed leaves them behind.
+left = subprocess.run(["docker", "ps", "--all", "--quiet", "--filter", f"label={SANDBOX_LABEL}",
+                       "--filter", "status=exited"], capture_output=True, text=True).stdout.split()
+if left:
+    subprocess.run(["docker", "rm", *left], capture_output=True)
+    print(f"Removed {len(left)} stopped sandbox container{'' if len(left) == 1 else 's'} that planted bugs left behind.")
 sys.exit(0 if all_ok else 1)

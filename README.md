@@ -8,20 +8,37 @@ A from-scratch, lesson-by-lesson Python implementation of
 
 ## Running
 
-Everything runs in one Docker container. The source is mounted **read-only**; only `tasks/`, `runs/` and `library/` are writable.
+Our code runs in one Docker container, `app`. The source is mounted **read-only**; only `tasks/`, `runs/`, `library/` and a scratch volume for temporary folders are writable. Code the model writes runs in separate, short-lived containers (see Safety).
 
 ```bash
 cp .env.example .env          # then set ANTHROPIC_API_KEY in .env
-docker compose build
-docker compose run --rm app                                          # offline test suite
+docker compose build          # also the image the sandboxes run
+docker compose run --rm app                                          # test suite (no API calls)
 docker compose run --rm app uv run --frozen python -m demos.d00_llm  # a lesson's demo
 ```
 
-If your API key isn't scoped to a workspace, also set `ANTHROPIC_WORKSPACE_ID` in `.env`.
+If your API key isn't scoped to a workspace, also set `ANTHROPIC_WORKSPACE_ID` in `.env`. On a Linux host, change `group_add` in [compose.yaml](compose.yaml) to the group id of `/var/run/docker.sock`.
 
 ## Safety
 
-From Lesson 2 on, the model writes code that we run. It runs inside the container with the workspace as its working directory, a timeout, and an environment without the API key; file tools refuse paths outside their folder; `.env` is hidden inside the container. That closes the easy paths, not all of them: model code shares the container with the executor, so it could still read the key from `/proc/<pid>/environ`, read the project source, or use the network. A fresh container per rollout (as in the paper) would close those. Use a workspace-scoped key with a spend limit.
+From Lesson 2 on, the model writes code that we run: `run_python` calls (from the agent and its subagents) and plugin hooks. Each call runs in a fresh container (`Sandbox` in [steps/s02_executor.py](steps/s02_executor.py)) that:
+
+- sees only that rollout's workspace (read-only for plugins): not the source, not other rollouts, not `tasks/` or `library/`;
+- has no network, and none of our environment, so no API key;
+- runs as an unprivileged user with every capability dropped and no way to gain more;
+- is capped at 128 processes and 512 MB of memory;
+- has its output cut to the start and end as it streams in, on our side, so printing gigabytes costs our container nothing;
+- is removed when the call ends, which kills anything it left running.
+
+[tests/test_s02_executor.py](tests/test_s02_executor.py) checks each of these from inside a sandbox, and `tests/mutations/` proves each check fails when its protection is removed.
+
+What remains:
+
+- The `app` container holds the API key and the Docker socket, and whoever can use that socket controls Docker. That is acceptable only because no model-written code runs in `app`; keep it that way. File tools run there, but they only read and write files, refusing paths outside their folder.
+- Containers share the kernel of Docker's VM, so a kernel exploit could escape one. A VM per call (gVisor, Firecracker) would be stronger; this project doesn't need it.
+- Use a workspace-scoped API key with a spend limit.
+
+If a run is killed mid-call, its sandbox may survive. `docker rm -f $(docker ps -aq --filter label=mini-harness2-sandbox)` removes every sandbox.
 
 ## Code layout
 
@@ -30,15 +47,15 @@ From Lesson 2 on, the model writes code that we run. It runs inside the containe
 - `config.py`: immutable default settings (frozen dataclasses), with no behaviour.
 - `tests/`: offline tests. They run the real Anthropic SDK against a scripted HTTP transport ([tests/scripted_api.py](tests/scripted_api.py)), and each test's docstring names the bug it guards against.
 - `tests/mutations/`: for each module, the bugs its tests must catch, and which test catches each one.
-- `tools/mutate.py`: plants those bugs one at a time in a copy of the project and checks the right test fails.
+- `tools/mutate.py` (`python -m tools.mutate`): plants those bugs one at a time in a copy of the project and checks the right test fails.
 
 ## Do the tests actually catch bugs?
 
 Passing tests prove little on their own. `tools/mutate.py` plants each bug listed in `tests/mutations/` into a temporary copy of the project and checks that the test named for it fails. It also runs *controls*: changes that alter nothing, which no test may fail on. The real files are never touched.
 
 ```bash
-docker compose run --rm app uv run --frozen python tools/mutate.py                                  # every list, about 2 minutes
-docker compose run --rm app uv run --frozen python tools/mutate.py tests/mutations/s01_harness.py   # one module
+docker compose run --rm app uv run --frozen python -m tools.mutate                                  # every list, about 7 minutes
+docker compose run --rm app uv run --frozen python -m tools.mutate tests/mutations/s01_harness.py   # one module
 ```
 
 When you add a test, add the bug it guards against to the matching list.
@@ -51,7 +68,7 @@ Read the lessons in order. Each `steps/sNN_*.py` opens with the paper section it
 |---|---|---|---|---|
 | L0 | [steps/s00_llm.py](steps/s00_llm.py) | §2.1 frozen M, §3.1 roles, Fig. 6 compute | The `LLM` gateway: `llm.call(role, …)`; executor vs editor models; a per-run usage and cost meter | `python -m demos.d00_llm` (offline), then `--live` |
 | L1 | [steps/s01_harness.py](steps/s01_harness.py) | §2.1, Table 5, §D.1-D.2, Prompt 1 rules | The harness as an immutable value: 8 components on an editable surface, H₀ in [base_harness/](base_harness/), `validate`, `diff`, load/write | `python -m demos.d01_harness` |
-| L2 | [steps/s02_executor.py](steps/s02_executor.py) | §2.1 A(q; M, H), §2.2.1 e = (τ, y), Table 5 activation, Table 7 | The agent loop, file and `run_python` tools, `load_skill`, `run_subagent`, plugin hooks, the execution record | `python -m demos.d02_executor` (live, about $0.01) |
+| L2 | [steps/s02_executor.py](steps/s02_executor.py) | §2.1 A(q; M, H), §2.2.1 e = (τ, y), Table 5 activation, Table 7 | The agent loop, file and `run_python` tools, `load_skill`, `run_subagent`, plugin hooks, the execution record, and the sandbox that model-written code runs in | `python -m demos.d02_executor` (live, about $0.01) |
 | L3 | s03_tasks | open-world task stream | | |
 | L4 | s04_propose | §2.2.1 Propose, Prompts 1-2 | | |
 | L5 | s05_probe | §2.2.1 Probe | | |

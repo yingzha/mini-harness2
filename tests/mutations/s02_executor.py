@@ -1,27 +1,18 @@
 """Bugs to plant in steps/s02_executor.py, each with the test that must catch it.
 
-Run with: python tools/mutate.py tests/mutations/s02_executor.py
+Run with: python -m tools.mutate tests/mutations/s02_executor.py
 A control (expect=None) changes nothing observable, so no test may fail for it.
 """
 
 MUTATIONS = [
     {
-        "label": "child inherits full env (API key)",
-        "file": "steps/s02_executor.py",
-        "replace": [
-            ("env = {**_CHILD_ENV, \"HOME\": str(cwd)}",
-             "env = None"),
-        ],
-        "expect": "test_model_code_does_not_inherit_the_api_key",
-    },
-    {
         "label": "timeout 15x too long",
         "file": "steps/s02_executor.py",
         "replace": [
-            ("text=True, timeout=timeout_s)",
-             "text=True, timeout=timeout_s * 15)"),
+            ("p.wait(timeout=timeout_s)",
+             "p.wait(timeout=timeout_s * 15)"),
         ],
-        "expect": "test_runaway_code_is_stopped_at_the_timeout",
+        "expect": "test_runaway_code_is_stopped_at_the_timeout_and_leaves_nothing_running",
     },
     {
         "label": "clip keeps only the head",
@@ -30,7 +21,7 @@ MUTATIONS = [
             ("return f\"{text[:half]}\\n[... {len(text) - 2 * half} characters cut ...]\\n{text[-half:]}\"",
              "return text[:limit] + \"\\n[... characters cut ...]\""),
         ],
-        "expect": "test_long_output_is_clipped_keeping_head_and_tail",
+        "expect": "test_clip_keeps_head_and_tail",
     },
     {
         "label": "clip disabled",
@@ -39,7 +30,7 @@ MUTATIONS = [
             ("    if len(text) <= limit:\n        return text",
              "    if True:\n        return text"),
         ],
-        "expect": "test_long_output_is_clipped_keeping_head_and_tail",
+        "expect": "test_clip_keeps_head_and_tail",
     },
     {
         "label": "path confinement check removed",
@@ -267,11 +258,263 @@ MUTATIONS = [
         "expect": "test_skill_and_subagent_tools_follow_the_harness",
     },
     {
+        "label": "sandbox gets the API key passed through",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("\"--network\", \"none\",",
+             "\"--network\", \"none\", \"--env\", \"ANTHROPIC_API_KEY\","),
+        ],
+        "expect": "test_model_code_sees_only_its_workspace_and_holds_no_power",
+    },
+    {
+        "label": "sandbox sees every process on the VM",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("\"--network\", \"none\",",
+             "\"--network\", \"none\", \"--pid\", \"host\","),
+        ],
+        "expect": "test_model_code_sees_only_its_workspace_and_holds_no_power",
+    },
+    {
+        "label": "sandbox given the folder around the workspace",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("*map(str, args)], workspace, writable=True",
+             "*map(str, args)], workspace.parent, writable=True"),
+        ],
+        "expect": "test_model_code_sees_only_its_workspace_and_holds_no_power",
+    },
+    {
+        "label": "network left on",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("            \"--network\", \"none\",\n",
+             ""),
+        ],
+        "expect": "test_model_code_sees_only_its_workspace_and_holds_no_power",
+    },
+    {
+        "label": "sandbox runs as root",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("\"--user\", self.settings.user,",
+             "\"--user\", \"root\","),
+        ],
+        "expect": "test_model_code_sees_only_its_workspace_and_holds_no_power",
+    },
+    {
+        "label": "capabilities kept",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("\"--cap-drop\", \"ALL\", \"--security-opt\"",
+             "\"--security-opt\""),
+        ],
+        "expect": "test_model_code_sees_only_its_workspace_and_holds_no_power",
+    },
+    {
+        "label": "privileges can be gained (setuid)",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            (" \"--security-opt\", \"no-new-privileges\",",
+             ""),
+        ],
+        "expect": "test_model_code_sees_only_its_workspace_and_holds_no_power",
+    },
+    {
+        "label": "run_python gets a read-only workspace",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("workspace, writable=True, timeout_s=timeout_s)",
+             "workspace, writable=False, timeout_s=timeout_s)"),
+        ],
+        "expect": "test_model_code_sees_only_its_workspace_and_holds_no_power",
+    },
+    {
+        "label": "container never removed",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("        finally:\n            subprocess.run([\"docker\", \"rm\", \"--force\", container], capture_output=True)",
+             "        finally:\n            pass"),
+        ],
+        "expect": "test_runaway_code_is_stopped_at_the_timeout_and_leaves_nothing_running",
+    },
+    {
+        "label": "containers not labelled, so leftovers are invisible",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("            \"--label\", f\"{SANDBOX_LABEL}={source}\",\n",
+             ""),
+        ],
+        "expect": "test_runaway_code_is_stopped_at_the_timeout_and_leaves_nothing_running",
+    },
+    {
+        "label": "output buffered, so it is lost at a timeout",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("_PYTHON = (\"python\", \"-I\", \"-u\")",
+             "_PYTHON = (\"python\", \"-I\")"),
+        ],
+        "expect": "test_runaway_code_is_stopped_at_the_timeout_and_leaves_nothing_running",
+    },
+    {
+        "label": "no process limit",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("            \"--pids-limit\", str(self.settings.pids_limit),\n",
+             ""),
+        ],
+        "expect": "test_fork_bombs_and_memory_blowups_stay_inside_the_sandbox",
+    },
+    {
+        "label": "no memory limit",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("            \"--memory\", self.settings.memory,\n",
+             ""),
+        ],
+        "expect": "test_fork_bombs_and_memory_blowups_stay_inside_the_sandbox",
+    },
+    {
+        "label": "images may be downloaded",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("            \"--pull\", \"never\",                     # only the image we built, never a download\n",
+             ""),
+        ],
+        "expect": "test_a_broken_sandbox_ends_the_rollout_instead_of_blaming_the_model",
+    },
+    {
+        "label": "a failed create goes unnoticed",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("if made.returncode != 0:",
+             "if False:"),
+        ],
+        "expect": "test_a_broken_sandbox_ends_the_rollout_instead_of_blaming_the_model",
+    },
+    {
+        "label": "sandbox failures reported to the model",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("    except SandboxError:\n        raise",
+             "    except ZeroDivisionError:\n        raise"),
+        ],
+        "expect": "test_a_broken_sandbox_ends_the_rollout_instead_of_blaming_the_model",
+    },
+    {
+        "label": "nested mount translated through its parent",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("point = max(points, key=len)",
+             "point = min(points, key=len)"),
+        ],
+        "expect": "test_host_paths_follow_the_most_specific_mount_and_keep_it_read_only",
+    },
+    {
+        "label": "write granted through a read-only mount",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("if writable and not folder.writable:",
+             "if False:"),
+        ],
+        "expect": "test_host_paths_follow_the_most_specific_mount_and_keep_it_read_only",
+    },
+    {
+        "label": "path on no mount accepted",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("    if not points:\n        raise SandboxError",
+             "    if False:\n        raise SandboxError"),
+        ],
+        "expect": "test_host_paths_follow_the_most_specific_mount_and_keep_it_read_only",
+    },
+    {
+        "label": "plugin prints corrupt its result",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("    os.dup2(2, 1)   # what",
+             "    pass   # what"),
+        ],
+        "expect": "test_plugin_notes_reach_the_model_and_nudges_are_bounded",
+    },
+    {
+        "label": "plugins may rewrite the deliverable",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("self._workspace, writable=False,",
+             "self._workspace, writable=True,"),
+        ],
+        "expect": "test_a_broken_plugin_is_recorded_and_the_rollout_continues",
+    },
+    {
+        "label": "a plugin's sys.exit crashes the rollout",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("except ValueError:   # it called",
+             "except ZeroDivisionError:   # it called"),
+        ],
+        "expect": "test_a_broken_plugin_is_recorded_and_the_rollout_continues",
+    },
+    {
+        "label": "sandbox output held in full while it streams",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("            del self._tail[:-self._half]\n",
+             ""),
+        ],
+        "expect": "test_huge_output_is_cut_on_our_side_keeping_head_and_tail",
+    },
+    {
+        "label": "a timed-out call waits for its code to finish",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("p.kill()   # its streams close",
+             "pass   # its streams close"),
+        ],
+        "expect": "test_runaway_code_is_stopped_at_the_timeout_and_leaves_nothing_running",
+    },
+    {
+        "label": "output that isn't UTF-8 crashes the tool",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("errors=\"replace\")   # model code",
+             "errors=\"strict\")   # model code"),
+        ],
+        "expect": "test_output_in_any_encoding_reaches_the_model",
+    },
+    {
+        "label": "start and end decoded apart",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("return decode(self._head + self._tail)",
+             "return decode(self._head) + decode(self._tail)"),
+        ],
+        "expect": "test_output_in_any_encoding_reaches_the_model",
+    },
+    {
+        "label": "stdin never reaches the sandbox",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("            stream.write(data)\n",
+             "            pass\n"),
+        ],
+        "expect": "test_plugin_notes_reach_the_model_and_nudges_are_bounded",
+    },
+    {
         "label": "equivalent: half = int(limit / 2)",
         "file": "steps/s02_executor.py",
         "replace": [
-            ("half = limit // 2",
-             "half = int(limit / 2)"),
+            ("    half = limit // 2\n",
+             "    half = int(limit / 2)\n"),
+        ],
+        "expect": None,
+    },
+    {
+        "label": "equivalent: sorted(...)[-1] instead of max",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("point = max(points, key=len)",
+             "point = sorted(points, key=len)[-1]"),
         ],
         "expect": None,
     },

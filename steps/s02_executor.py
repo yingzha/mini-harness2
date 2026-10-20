@@ -17,33 +17,35 @@ Design
 * `run_agent_loop` is the generic tool-use loop. Lesson 4 reuses it for the
   harness editors, with different tools and no plugins.
 * A `Tool` is a value: the schema the model sees plus the handler we run.
-  `file_tools(read_root, write_root)` builds file tools for any sandbox.
-* Code the model writes (run_python, plugin hooks) runs in a subprocess with the
-  workspace as its cwd, a timeout, and an environment without the API key.
-  That is containment, not a security sandbox: the subprocess still shares the
-  container with the executor (see README, "Safety").
+  `file_tools(read_root, write_root)` builds file tools for any folder.
+* Code the model writes (run_python, plugin hooks) runs in a `Sandbox`: a fresh
+  Docker container per call that sees only the workspace, with no network, no
+  secrets, an unprivileged user and process and memory caps, removed with
+  everything it started when the call ends. Our own code, which holds the API
+  key, never runs model-written code (see README, "Safety").
 """
 
 from __future__ import annotations
 
 import ast
+import contextlib
 import json
 import shutil
+import socket
 import subprocess
-import sys
-import tempfile
+import threading
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Protocol
+from typing import IO, Any, Callable, Mapping, Protocol
 
-from config import RolloutLimits
+from config import RolloutLimits, SandboxSettings
 from steps.s00_llm import LLM, text_of
 from steps.s01_harness import PLUGIN_FILE, PLUGIN_HOOKS, SCRIPT_FILE, SKILL_SCRIPT, Document, Harness, validate
 
 MAX_OUTPUT_CHARS = 20_000   # per tool result, so one big print can't flood the context
+                            # (sandbox output is cut at this many bytes, never more characters)
 MAX_NUDGES = 2              # how often before_finish hooks may keep the agent working
-_CHILD_ENV = MappingProxyType({"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"})
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +183,28 @@ def file_tools(read_root: Path, write_root: Path) -> list[Tool]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# The sandbox: where code the model wrote runs
+# ---------------------------------------------------------------------------
+
+WORKDIR = "/work"                        # where a sandbox sees the workspace
+SANDBOX_LABEL = "mini-harness2-sandbox"  # on every sandbox container; its value is the workspace
+_PYTHON = ("python", "-I", "-u")         # -I: ignore env and user site. -u: unbuffered, so
+                                         # what it printed before a timeout isn't lost
+
+
+class SandboxError(RuntimeError):
+    """Docker couldn't run the sandbox. That is our failure, not the model's, so it
+    ends the rollout instead of reaching the agent as a tool error."""
+
+
+@dataclass(frozen=True)
+class HostFolder:
+    """A folder mounted into this container, as the Docker daemon knows it."""
+    source: str      # its path on the machine running Docker
+    writable: bool
+
+
 @dataclass(frozen=True)
 class Completed:
     returncode: int | None   # None: killed at the timeout
@@ -188,39 +212,140 @@ class Completed:
     stderr: str
 
 
-def run_confined(cmd: list[str], cwd: Path, timeout_s: float, stdin: str = "") -> Completed:
-    """Run code the model wrote: cwd = its workspace, a timeout, and an
-    environment that does not carry the API key."""
-    env = {**_CHILD_ENV, "HOME": str(cwd)}
-    try:
-        p = subprocess.run(cmd, cwd=cwd, env=env, input=stdin, capture_output=True, text=True, timeout=timeout_s)
-        return Completed(p.returncode, p.stdout, p.stderr)
-    except subprocess.TimeoutExpired as e:
-        as_text = lambda b: b.decode(errors="replace") if isinstance(b, bytes) else (b or "")
-        return Completed(None, as_text(e.stdout), as_text(e.stderr))
+class _HeadTail:
+    """Keeps the start and the end of a stream, `limit` bytes in all, however much
+    comes through. Output is read on our side of the sandbox, so how much of our
+    memory it takes must not be up to the code that prints it. (`clip` does the
+    same for text already in memory.)"""
+
+    def __init__(self, limit: int) -> None:
+        self._half = limit // 2
+        self._head = bytearray()
+        self._tail = bytearray()
+        self._total = 0
+
+    def read_all(self, stream: IO[bytes]) -> None:
+        while chunk := stream.read1(1 << 16):
+            self._total += len(chunk)
+            room = self._half - len(self._head)
+            self._head += chunk[:room]
+            self._tail += chunk[room:]
+            del self._tail[:-self._half]
+
+    def text(self) -> str:
+        decode = lambda b: bytes(b).decode(errors="replace")   # model code may print any bytes
+        cut = self._total - len(self._head) - len(self._tail)
+        if not cut:   # head and tail are one stream: decode them together, or a character between them breaks
+            return decode(self._head + self._tail)
+        return f"{decode(self._head)}\n[... {cut} bytes cut ...]\n{decode(self._tail)}"
 
 
-def run_python_tool(workspace: Path, timeout_s: float) -> Tool:
+def _feed(stream: IO[bytes], data: bytes) -> None:
+    with contextlib.suppress(BrokenPipeError):   # the process exited without reading it all
+        with stream:
+            stream.write(data)
+
+
+def host_path(mounts: Mapping[str, HostFolder], path: Path, *, writable: bool) -> str:
+    """Where `path`, a path in this container, is for the Docker daemon.
+
+    `docker create --mount` takes paths on the machine running Docker, not paths
+    in our container, so a path is translated through the mount it lies on.
+    `mounts` maps each mount point in this container to that folder."""
+    path = path.resolve()
+    points = [p for p in mounts if path.is_relative_to(p)]
+    if not points:
+        raise SandboxError(f"{path} is on no mounted folder, so no sandbox can be given it")
+    point = max(points, key=len)   # the most specific mount: /app/runs, not /app
+    folder = mounts[point]
+    if writable and not folder.writable:
+        raise SandboxError(f"{path} is read-only here, so a sandbox can't be given it to write")
+    return str(PurePosixPath(folder.source) / path.relative_to(point))
+
+
+@dataclass(frozen=True)
+class Sandbox:
+    """Runs each command in a fresh container that sees only the workspace it is
+    given: no network, no environment from us (so no API key), an unprivileged
+    user without capabilities, and caps on processes and memory. However the call
+    ends, the container is removed, which kills whatever it left running."""
+    settings: SandboxSettings
+    mounts: Mapping[str, HostFolder]   # this container's mounts (see host_path)
+
+    @classmethod
+    def from_docker(cls, settings: SandboxSettings) -> Sandbox:
+        """Ask Docker for this container's mounts. A container's hostname is its ID."""
+        done = subprocess.run(["docker", "inspect", "--format", "{{json .Mounts}}", socket.gethostname()],
+                              capture_output=True, text=True)
+        if done.returncode != 0:
+            raise SandboxError("can't inspect this container; run inside it, with the Docker socket "
+                               f"mounted (see compose.yaml): {done.stderr.strip()}")
+        return cls(settings, MappingProxyType({m["Destination"]: HostFolder(m["Source"], m["RW"])
+                                               for m in json.loads(done.stdout)}))
+
+    def run(self, cmd: list[str], workspace: Path, *, writable: bool, timeout_s: float,
+            stdin: str = "") -> Completed:
+        source = host_path(self.mounts, workspace, writable=writable)
+        mount = f"type=bind,src={source},dst={WORKDIR}"
+        made = subprocess.run([
+            "docker", "create", "--interactive",
+            "--label", f"{SANDBOX_LABEL}={source}",
+            "--pull", "never",                     # only the image we built, never a download
+            "--network", "none",
+            "--user", self.settings.user,
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--pids-limit", str(self.settings.pids_limit),
+            "--memory", self.settings.memory,
+            "--mount", mount if writable else f"{mount},readonly",
+            "--workdir", WORKDIR,
+            self.settings.image, *cmd,
+        ], capture_output=True, text=True)
+        if made.returncode != 0:
+            raise SandboxError(f"Docker couldn't create the sandbox: {made.stderr.strip()}")
+        container = made.stdout.strip()
+        out, err = _HeadTail(MAX_OUTPUT_CHARS), _HeadTail(MAX_OUTPUT_CHARS)
+        try:
+            with subprocess.Popen(["docker", "start", "--attach", "--interactive", container],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
+                io = [threading.Thread(target=_feed, args=(p.stdin, stdin.encode())),
+                      threading.Thread(target=out.read_all, args=(p.stdout,)),
+                      threading.Thread(target=err.read_all, args=(p.stderr,))]
+                for t in io:
+                    t.start()
+                try:
+                    returncode = p.wait(timeout=timeout_s)
+                except subprocess.TimeoutExpired:
+                    p.kill()   # its streams close, so the threads finish
+                    returncode = None
+                for t in io:
+                    t.join()
+        finally:
+            subprocess.run(["docker", "rm", "--force", container], capture_output=True)
+        return Completed(returncode, out.text(), err.text())
+
+
+def run_python_tool(sandbox: Sandbox, workspace: Path, timeout_s: float) -> Tool:
     def run(inp: Mapping[str, Any]) -> ToolResult:
         code, script, args = inp.get("code"), inp.get("script"), inp.get("args", [])
         if (code is None) == (script is None):
             return ToolResult("Give exactly one of `code` or `script`.", is_error=True)
         if not isinstance(args, list):  # a string would become one argument per character
             return ToolResult("`args` must be a list of strings.", is_error=True)
-        target = ["-c", code] if code is not None else [str(resolve_inside(workspace, script))]
-        done = run_confined([sys.executable, "-I", *target, *map(str, args)], workspace, timeout_s)
+        target = ["-c", code] if code is not None else [script]
+        done = sandbox.run([*_PYTHON, *target, *map(str, args)], workspace, writable=True, timeout_s=timeout_s)
         status = f"timed out after {timeout_s:g}s" if done.returncode is None else f"exit code {done.returncode}"
-        parts = [status]
+        parts = [status]   # the sandbox has already cut stdout and stderr to size
         if done.stdout:
-            parts.append(f"stdout:\n{clip(done.stdout)}")
+            parts.append(f"stdout:\n{done.stdout}")
         if done.stderr:
-            parts.append(f"stderr:\n{clip(done.stderr)}")
+            parts.append(f"stderr:\n{done.stderr}")
         return ToolResult("\n".join(parts), is_error=done.returncode != 0)
 
     return Tool(
         "run_python",
-        f"Run Python with the workspace as the current directory ({timeout_s:g}s limit). "
-        "Give `code` to run a snippet, or `script` (a .py path in the workspace) plus optional `args`.",
+        f"Run Python with the workspace as the current directory ({timeout_s:g}s limit, standard "
+        "library only, no network). Give `code` to run a snippet, or `script` (a .py path in the "
+        "workspace) plus optional `args`.",
         {"type": "object", "properties": {
             "code": {"type": "string"},
             "script": {"type": "string"},
@@ -252,7 +377,8 @@ def skill_tool(harness: Harness) -> Tool | None:
                  "required": ["name"]}, run)
 
 
-def subagent_tool(llm: LLM, harness: Harness, workspace: Path, limits: RolloutLimits) -> Tool | None:
+def subagent_tool(llm: LLM, sandbox: Sandbox, harness: Harness, workspace: Path,
+                  limits: RolloutLimits) -> Tool | None:
     """C5: a worker in its own context that returns only its final text. It gets
     the file tools and run_python, but cannot delegate again (depth 1)."""
     agents = harness.subagents()
@@ -263,7 +389,7 @@ def subagent_tool(llm: LLM, harness: Harness, workspace: Path, limits: RolloutLi
         agent = agents.get(inp["name"])
         if agent is None:
             return ToolResult(f"No subagent {inp['name']!r}. Available: {', '.join(sorted(agents))}.", is_error=True)
-        tools = [*file_tools(workspace, workspace), run_python_tool(workspace, limits.tool_timeout_s)]
+        tools = [*file_tools(workspace, workspace), run_python_tool(sandbox, workspace, limits.tool_timeout_s)]
         sub = run_agent_loop(llm, "executor", agent.body, inp["prompt"], tools, max_turns=limits.subagent_max_turns)
         if sub.stop_reason != "end_turn" or not sub.final_text.strip():
             return ToolResult(f"The subagent stopped ({sub.stop_reason}) without an answer.",
@@ -291,22 +417,28 @@ class Hooks(Protocol):
     def before_finish(self, event: dict[str, Any]) -> HookResult: ...
 
 
+# Runs in the sandbox: reads {source, path, hook, event} on stdin, writes the hook's result on stdout.
 _HOOK_RUNNER = """
-import json, runpy, sys
-hook = runpy.run_path(sys.argv[1])[sys.argv[2]]
-result = hook(json.load(sys.stdin))
-with open(sys.argv[3], "w") as f:
-    json.dump(result, f)
+import json, os, sys
+request = json.load(sys.stdin)
+with os.fdopen(os.dup(1), "w") as result:
+    os.dup2(2, 1)   # what the plugin prints, even from a subprocess, goes to stderr, not into its result
+    plugin = {"__name__": "plugin"}
+    exec(compile(request["source"], request["path"], "exec"), plugin)
+    json.dump(plugin[request["hook"]](request["event"]), result)
 """
 
 
 class PluginHooks:
-    """Runs each plugin's hooks in a confined subprocess. A plugin that crashes
-    or times out is recorded, never fatal: it must not take the rollout down."""
+    """Runs each plugin's hooks in the sandbox, with the workspace read-only: a
+    plugin observes and advises, it never changes the deliverable behind the
+    agent's back. A plugin that crashes, hangs or returns garbage is recorded,
+    never fatal: it must not take the rollout down."""
 
-    def __init__(self, sources: Mapping[str, Path], defined: Mapping[str, frozenset[str]],
+    def __init__(self, sandbox: Sandbox, sources: Mapping[str, str], defined: Mapping[str, frozenset[str]],
                  workspace: Path, timeout_s: float) -> None:
-        self._sources = sources      # plugin name -> its .py file (outside the workspace)
+        self._sandbox = sandbox
+        self._sources = sources      # plugin name -> its code
         self._defined = defined      # plugin name -> the hooks it defines
         self._workspace = workspace
         self._timeout_s = timeout_s
@@ -325,15 +457,18 @@ class PluginHooks:
         for name, source in sorted(self._sources.items()):
             if hook not in self._defined[name]:
                 continue
-            result_file = source.with_suffix(f".{hook}.json")
-            result_file.unlink(missing_ok=True)
-            done = run_confined([sys.executable, "-I", "-c", _HOOK_RUNNER, str(source), hook, str(result_file)],
-                                self._workspace, self._timeout_s, stdin=json.dumps(event))
+            request = json.dumps({"source": source, "path": f"plugin/{name}.py", "hook": hook, "event": event})
+            done = self._sandbox.run([*_PYTHON, "-c", _HOOK_RUNNER], self._workspace, writable=False,
+                                     timeout_s=self._timeout_s, stdin=request)
             if done.returncode != 0:
                 why = "timed out" if done.returncode is None else (done.stderr.strip().splitlines() or ["crashed"])[-1]
                 errors.append(f"plugin {name}.{hook}: {why}")
                 continue
-            value = json.loads(result_file.read_text())
+            try:
+                value = json.loads(done.stdout)
+            except ValueError:   # it called sys.exit(), or its result was cut to size
+                errors.append(f"plugin {name}.{hook}: no readable result (it exited early, or returned too much)")
+                continue
             if value is None:
                 continue
             if isinstance(value, str):
@@ -343,18 +478,15 @@ class PluginHooks:
         return HookResult(tuple(texts), tuple(errors))
 
 
-def plugin_hooks(harness: Harness, plugin_dir: Path, workspace: Path, timeout_s: float) -> PluginHooks | None:
-    """Write the harness's plugins to `plugin_dir` (outside the workspace, so the
-    agent can't edit them) and return hooks that run them. None if there are none."""
-    sources, defined = {}, {}
-    for path, text in harness.files.items():
-        if PLUGIN_FILE.fullmatch(path):
-            name = Path(path).stem
-            sources[name] = plugin_dir / f"{name}.py"
-            sources[name].write_text(text, encoding="utf-8")
-            defined[name] = frozenset(n.name for n in ast.parse(text).body
-                                      if isinstance(n, ast.FunctionDef) and n.name in PLUGIN_HOOKS)
-    return PluginHooks(sources, defined, workspace, timeout_s) if sources else None
+def plugin_hooks(harness: Harness, sandbox: Sandbox, workspace: Path, timeout_s: float) -> PluginHooks | None:
+    """Hooks that run the harness's plugins, or None if it has none. Plugin code
+    reaches the sandbox with each call, so it never sits in the workspace where
+    the agent could edit it."""
+    sources = {Path(path).stem: text for path, text in harness.files.items() if PLUGIN_FILE.fullmatch(path)}
+    defined = {name: frozenset(n.name for n in ast.parse(text).body
+                               if isinstance(n, ast.FunctionDef) and n.name in PLUGIN_HOOKS)
+               for name, text in sources.items()}
+    return PluginHooks(sandbox, sources, defined, workspace, timeout_s) if sources else None
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +504,8 @@ def _run_tool(tools: Mapping[str, Tool], name: str, inp: Mapping[str, Any]) -> T
         return ToolResult(f"Unknown tool {name!r}. Available: {', '.join(sorted(tools))}.", is_error=True)
     try:
         return tool.run(inp)
+    except SandboxError:
+        raise  # our infrastructure failed: the rollout is void, and the model is not to blame
     except Exception as e:  # a failing tool is reported to the model; it must not end the rollout
         return ToolResult(f"{name} failed: {type(e).__name__}: {e}", is_error=True)
 
@@ -460,18 +594,17 @@ def prepare_workspace(workspace: Path, source_dir: Path, harness: Harness) -> No
             (workspace / path).write_text(text, encoding="utf-8")
 
 
-def execute(llm: LLM, harness: Harness, task: str, source_dir: Path, workspace: Path,
+def execute(llm: LLM, sandbox: Sandbox, harness: Harness, task: str, source_dir: Path, workspace: Path,
             limits: RolloutLimits, *, label: str) -> ExecutionRecord:
     """Run the agent once on a task and record what it did and produced."""
     if errors := validate(harness):
         raise ValueError("refusing to run an invalid harness: " + "; ".join(errors))
     prepare_workspace(workspace, source_dir, harness)
-    tools = [*file_tools(workspace, workspace), run_python_tool(workspace, limits.tool_timeout_s)]
-    tools += [t for t in (skill_tool(harness), subagent_tool(llm, harness, workspace, limits)) if t]
-    with tempfile.TemporaryDirectory() as plugin_dir:
-        hooks = plugin_hooks(harness, Path(plugin_dir), workspace, limits.tool_timeout_s)
-        result = run_agent_loop(llm, "executor", harness.always_on_text(), task, tools,
-                                max_turns=limits.max_turns, hooks=hooks)
+    tools = [*file_tools(workspace, workspace), run_python_tool(sandbox, workspace, limits.tool_timeout_s)]
+    tools += [t for t in (skill_tool(harness), subagent_tool(llm, sandbox, harness, workspace, limits)) if t]
+    hooks = plugin_hooks(harness, sandbox, workspace, limits.tool_timeout_s)
+    result = run_agent_loop(llm, "executor", harness.always_on_text(), task, tools,
+                            max_turns=limits.max_turns, hooks=hooks)
     output = workspace / "output"
     deliverable = {p.relative_to(output).as_posix(): p.read_text(encoding="utf-8", errors="replace")
                    for p in sorted(output.rglob("*")) if p.is_file()}

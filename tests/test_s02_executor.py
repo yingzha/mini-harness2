@@ -93,6 +93,16 @@ def test_runaway_code_is_stopped_at_the_timeout(tmp_path):
     assert time.monotonic() - start < 10
 
 
+def test_run_python_rejects_args_that_are_not_a_list(tmp_path):
+    """Guards: `args` sent as one string silently becoming one argument per
+    character, so a script runs with garbage input and reports nothing wrong."""
+    (tmp_path / "echo.py").write_text("import sys; print(sys.argv[1:])")
+    tool = run_python_tool(tmp_path, 5)
+    assert tool.run({"script": "echo.py", "args": ["in.csv", "out.csv"]}).output.endswith("['in.csv', 'out.csv']\n")
+    wrong = tool.run({"script": "echo.py", "args": "in.csv out.csv"})
+    assert wrong.is_error and "must be a list" in wrong.output
+
+
 def test_long_output_is_clipped_keeping_head_and_tail(tmp_path):
     """Guards: printing a whole data file flooding the context window, and
     clipping that drops the end, where a traceback's actual error sits."""
@@ -206,9 +216,11 @@ def test_a_broken_plugin_is_recorded_and_the_rollout_continues(tmp_path, source)
 # --- Skills (C6), subagents (C5), the workspace, the record ---------------------
 
 def test_skill_and_subagent_tools_follow_the_harness(tmp_path, source):
-    """Guards: offering tools that can only fail (no skills to load), a
-    subagent that can delegate again (unbounded recursion), and a subagent
-    flooding the caller's context instead of returning only its answer."""
+    """Guards: offering tools that can only fail (no skills to load), the agent
+    not being told what each skill or subagent is for (Lesson 1 requires the
+    descriptions for exactly this), a subagent that can delegate again
+    (unbounded recursion), and a subagent flooding the caller's context
+    instead of returning only its answer."""
     llm, api = scripted(done())
     execute(llm, H0, "task", source, tmp_path / "ws0", LIMITS, label="h0")
     assert {t["name"] for t in api.requests[0].body["tools"]} == {"list_files", "read_file", "write_file", "run_python"}
@@ -227,7 +239,9 @@ def test_skill_and_subagent_tools_follow_the_harness(tmp_path, source):
         done())                                                             # back in the main loop
     record = execute(llm, harness, "task", source, tmp_path / "ws1", LIMITS, label="h1")
 
-    assert {"load_skill", "run_subagent"} <= {t["name"] for t in api.requests[0].body["tools"]}
+    offered = {t["name"]: t["description"] for t in api.requests[0].body["tools"]}
+    assert "- money: Parse money strings." in offered["load_skill"]
+    assert "- reader: Summarises a file." in offered["run_subagent"]
     subagent = api.requests[1].body
     assert subagent["system"] == "You summarise files."
     assert "run_subagent" not in {t["name"] for t in subagent["tools"]}

@@ -45,22 +45,27 @@ def test_requests_are_valid_for_the_real_sdk():
 
 def test_meter_costs_follow_reported_usage():
     """Guards: cost accounting drifting from the API's usage numbers (the
-    Fig. 6 compute comparison relies on it), including the real API omitting
-    cache fields entirely, which arrive as None rather than 0."""
+    Fig. 6 compute comparison relies on it): totals that keep only the last
+    call instead of adding up every call, and the real API omitting cache
+    fields entirely, which arrive as None rather than 0."""
     settings = replace(SETTINGS, prices=MappingProxyType({
         EXECUTOR: Price(input=1, output=2, cache_read=0.1, cache_write=1.25),
         EDITOR: Price(input=10, output=20, cache_read=1, cache_write=12.5),
     }))
     api = ScriptedAPI([
         reply(text("a"), model=EXECUTOR, input_tokens=1000, output_tokens=500),  # no cache fields
+        reply(text("a"), model=EXECUTOR, input_tokens=2000, output_tokens=0),
         reply(text("b"), model=EDITOR, input_tokens=100, output_tokens=10, cache_read=1000, cache_write=200),
     ])
     llm = LLM(api.client(), settings)
     llm.call("executor", "sys", USER)
+    llm.call("executor", "sys", USER)
     llm.call("editor", "sys", USER)
 
     usage = llm.meter.snapshot()
-    assert usage["executor"].cost_usd == pytest.approx((1000 * 1 + 500 * 2) / 1e6)
+    assert usage["executor"].calls == 2
+    assert usage["executor"].input_tokens == 3000
+    assert usage["executor"].cost_usd == pytest.approx((1000 * 1 + 500 * 2 + 2000 * 1) / 1e6)
     assert usage["editor"].cost_usd == pytest.approx((100 * 10 + 10 * 20 + 1000 * 1 + 200 * 12.5) / 1e6)
     assert usage["editor"].cache_read_tokens == 1000
     assert llm.meter.total_cost == pytest.approx(usage["executor"].cost_usd + usage["editor"].cost_usd)

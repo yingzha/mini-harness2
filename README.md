@@ -29,6 +29,19 @@ From Lesson 2 on, the model writes code that we run. It runs inside the containe
 - `demos/dNN_*.py`: the runnable entry point for each lesson. The only place that reads `config.py` and builds real clients.
 - `config.py`: immutable default settings (frozen dataclasses), with no behaviour.
 - `tests/`: offline tests. They run the real Anthropic SDK against a scripted HTTP transport ([tests/scripted_api.py](tests/scripted_api.py)), and each test's docstring names the bug it guards against.
+- `tests/mutations/`: for each module, the bugs its tests must catch, and which test catches each one.
+- `tools/mutate.py`: plants those bugs one at a time in a copy of the project and checks the right test fails.
+
+## Do the tests actually catch bugs?
+
+Passing tests prove little on their own. `tools/mutate.py` plants each bug listed in `tests/mutations/` into a temporary copy of the project and checks that the test named for it fails. It also runs *controls*: changes that alter nothing, which no test may fail on. The real files are never touched.
+
+```bash
+docker compose run --rm app uv run --frozen python tools/mutate.py                                  # every list, about 2 minutes
+docker compose run --rm app uv run --frozen python tools/mutate.py tests/mutations/s01_harness.py   # one module
+```
+
+When you add a test, add the bug it guards against to the matching list.
 
 ## Learning path
 

@@ -34,15 +34,16 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Protocol
 
 from config import RolloutLimits
 from steps.s00_llm import LLM, text_of
-from steps.s01_harness import PLUGIN_FILE, PLUGIN_HOOKS, SCRIPT_FILE, SKILL_SCRIPT, Harness, validate
+from steps.s01_harness import PLUGIN_FILE, PLUGIN_HOOKS, SCRIPT_FILE, SKILL_SCRIPT, Document, Harness, validate
 
 MAX_OUTPUT_CHARS = 20_000   # per tool result, so one big print can't flood the context
 MAX_NUDGES = 2              # how often before_finish hooks may keep the agent working
-_CHILD_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"}
+_CHILD_ENV = MappingProxyType({"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"})
 
 
 # ---------------------------------------------------------------------------
@@ -201,11 +202,13 @@ def run_confined(cmd: list[str], cwd: Path, timeout_s: float, stdin: str = "") -
 
 def run_python_tool(workspace: Path, timeout_s: float) -> Tool:
     def run(inp: Mapping[str, Any]) -> ToolResult:
-        code, script = inp.get("code"), inp.get("script")
+        code, script, args = inp.get("code"), inp.get("script"), inp.get("args", [])
         if (code is None) == (script is None):
             return ToolResult("Give exactly one of `code` or `script`.", is_error=True)
+        if not isinstance(args, list):  # a string would become one argument per character
+            return ToolResult("`args` must be a list of strings.", is_error=True)
         target = ["-c", code] if code is not None else [str(resolve_inside(workspace, script))]
-        done = run_confined([sys.executable, "-I", *target, *map(str, inp.get("args", []))], workspace, timeout_s)
+        done = run_confined([sys.executable, "-I", *target, *map(str, args)], workspace, timeout_s)
         status = f"timed out after {timeout_s:g}s" if done.returncode is None else f"exit code {done.returncode}"
         parts = [status]
         if done.stdout:
@@ -227,12 +230,16 @@ def run_python_tool(workspace: Path, timeout_s: float) -> Tool:
     )
 
 
+def _listing(documents: Mapping[str, Document]) -> str:
+    """One line per skill or subagent: what the agent reads to choose one."""
+    return "\n".join(f"- {name}: {d.meta.get('description', '')}" for name, d in sorted(documents.items()))
+
+
 def skill_tool(harness: Harness) -> Tool | None:
     """C6: offered only when the harness has skills."""
     skills = harness.skills()
     if not skills:
         return None
-    listing = "\n".join(f"- {n}: {s.meta.get('description', '')}" for n, s in sorted(skills.items()))
 
     def run(inp: Mapping[str, Any]) -> ToolResult:
         skill = skills.get(inp["name"])
@@ -240,7 +247,7 @@ def skill_tool(harness: Harness) -> Tool | None:
             return ToolResult(f"No skill {inp['name']!r}. Available: {', '.join(sorted(skills))}.", is_error=True)
         return ToolResult(skill.body.strip() or "(this skill is empty)")
 
-    return Tool("load_skill", f"Load a skill's procedure into context. Skills:\n{listing}",
+    return Tool("load_skill", f"Load a skill's procedure into context. Skills:\n{_listing(skills)}",
                 {"type": "object", "properties": {"name": {"type": "string", "enum": sorted(skills)}},
                  "required": ["name"]}, run)
 
@@ -251,7 +258,6 @@ def subagent_tool(llm: LLM, harness: Harness, workspace: Path, limits: RolloutLi
     agents = harness.subagents()
     if not agents:
         return None
-    listing = "\n".join(f"- {n}: {a.meta.get('description', '')}" for n, a in sorted(agents.items()))
 
     def run(inp: Mapping[str, Any]) -> ToolResult:
         agent = agents.get(inp["name"])
@@ -264,7 +270,7 @@ def subagent_tool(llm: LLM, harness: Harness, workspace: Path, limits: RolloutLi
                               is_error=True, subtrace=sub.steps)
         return ToolResult(clip(sub.final_text), subtrace=sub.steps)
 
-    return Tool("run_subagent", f"Delegate a self-contained job; you get back only its final answer. Subagents:\n{listing}",
+    return Tool("run_subagent", f"Delegate a self-contained job; you get back only its final answer. Subagents:\n{_listing(agents)}",
                 {"type": "object", "properties": {"name": {"type": "string", "enum": sorted(agents)},
                                                   "prompt": {"type": "string"}},
                  "required": ["name", "prompt"]}, run)

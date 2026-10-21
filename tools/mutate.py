@@ -24,8 +24,8 @@ from pathlib import Path
 from steps.s02_executor import SANDBOX_LABEL
 
 ROOT = Path(__file__).resolve().parent.parent
-_NOT_COPIED = shutil.ignore_patterns(".git", ".venv", ".env", "runs", "library", "tasks",
-                                     "__pycache__", ".pytest_cache", "*.pdf")
+_NOT_COPIED = shutil.ignore_patterns(".git", ".venv", ".env", "runs", "data", "__pycache__",
+                                     ".pytest_cache", "*.pdf")
 
 
 def failing_tests(mutation: dict | None) -> set[str] | str:

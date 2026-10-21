@@ -11,5 +11,4 @@ __pycache__/
 
 # Generated at run time (rollout workspaces can hold anything the model wrote)
 runs/
-library/
-tasks/
+data/

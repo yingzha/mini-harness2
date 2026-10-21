@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import hashlib
 import json
 import shutil
 import socket
@@ -85,7 +86,7 @@ class ExecutionRecord:
     label: str
     harness: Harness
     steps: tuple[Step, ...]           # τ
-    deliverable: Mapping[str, str]    # y: every file in output/, by path
+    deliverable: Mapping[str, str]    # y: every file the agent created or changed, by workspace path
     final_text: str
     stop_reason: str
     hook_errors: tuple[str, ...]
@@ -283,10 +284,18 @@ class Sandbox:
         return cls(settings, MappingProxyType({m["Destination"]: HostFolder(m["Source"], m["RW"])
                                                for m in json.loads(done.stdout)}))
 
-    def run(self, cmd: list[str], workspace: Path, *, writable: bool, timeout_s: float,
-            stdin: str = "") -> Completed:
+    def run(self, cmd: list[str], workspace: Path, *, writable: bool, timeout_s: float, stdin: str = "",
+            readonly: Mapping[str, Path] = MappingProxyType({}), env: Mapping[str, str] = MappingProxyType({}),
+            max_output: int = MAX_OUTPUT_CHARS) -> Completed:
+        """`workspace` is mounted at WORKDIR, the working directory. `readonly` maps
+        more container paths to folders of ours, mounted read-only; `env` sets
+        variables. Nothing else of ours reaches the container. Each output stream
+        is cut to `max_output` bytes (start and end kept)."""
         source = host_path(self.mounts, workspace, writable=writable)
         mount = f"type=bind,src={source},dst={WORKDIR}"
+        more = [arg for dst, path in readonly.items() for arg in
+                ("--mount", f"type=bind,src={host_path(self.mounts, path, writable=False)},dst={dst},readonly")]
+        variables = [arg for name, value in env.items() for arg in ("--env", f"{name}={value}")]
         made = subprocess.run([
             "docker", "create", "--interactive",
             "--label", f"{SANDBOX_LABEL}={source}",
@@ -296,14 +305,14 @@ class Sandbox:
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--pids-limit", str(self.settings.pids_limit),
             "--memory", self.settings.memory,
-            "--mount", mount if writable else f"{mount},readonly",
+            "--mount", mount if writable else f"{mount},readonly", *more, *variables,
             "--workdir", WORKDIR,
             self.settings.image, *cmd,
         ], capture_output=True, text=True)
         if made.returncode != 0:
             raise SandboxError(f"Docker couldn't create the sandbox: {made.stderr.strip()}")
         container = made.stdout.strip()
-        out, err = _HeadTail(MAX_OUTPUT_CHARS), _HeadTail(MAX_OUTPUT_CHARS)
+        out, err = _HeadTail(max_output), _HeadTail(max_output)
         try:
             with subprocess.Popen(["docker", "start", "--attach", "--interactive", container],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
@@ -436,11 +445,12 @@ class PluginHooks:
     never fatal: it must not take the rollout down."""
 
     def __init__(self, sandbox: Sandbox, sources: Mapping[str, str], defined: Mapping[str, frozenset[str]],
-                 workspace: Path, timeout_s: float) -> None:
+                 workspace: Path, baseline: Mapping[str, str], timeout_s: float) -> None:
         self._sandbox = sandbox
         self._sources = sources      # plugin name -> its code
         self._defined = defined      # plugin name -> the hooks it defines
         self._workspace = workspace
+        self._baseline = baseline    # the workspace as the rollout started (see changed_files)
         self._timeout_s = timeout_s
 
     def after_tool(self, event: dict[str, Any]) -> HookResult:
@@ -450,9 +460,7 @@ class PluginHooks:
         return self._call("before_finish", event)
 
     def _call(self, hook: str, event: dict[str, Any]) -> HookResult:
-        output_dir = self._workspace / "output"
-        event = {**event, "output_files": sorted(p.relative_to(output_dir).as_posix()
-                                                 for p in output_dir.rglob("*") if p.is_file())}
+        event = {**event, "changed_files": changed_files(self._workspace, self._baseline)}
         texts, errors = [], []
         for name, source in sorted(self._sources.items()):
             if hook not in self._defined[name]:
@@ -478,7 +486,8 @@ class PluginHooks:
         return HookResult(tuple(texts), tuple(errors))
 
 
-def plugin_hooks(harness: Harness, sandbox: Sandbox, workspace: Path, timeout_s: float) -> PluginHooks | None:
+def plugin_hooks(harness: Harness, sandbox: Sandbox, workspace: Path, baseline: Mapping[str, str],
+                 timeout_s: float) -> PluginHooks | None:
     """Hooks that run the harness's plugins, or None if it has none. Plugin code
     reaches the sandbox with each call, so it never sits in the workspace where
     the agent could edit it."""
@@ -486,7 +495,7 @@ def plugin_hooks(harness: Harness, sandbox: Sandbox, workspace: Path, timeout_s:
     defined = {name: frozenset(n.name for n in ast.parse(text).body
                                if isinstance(n, ast.FunctionDef) and n.name in PLUGIN_HOOKS)
                for name, text in sources.items()}
-    return PluginHooks(sandbox, sources, defined, workspace, timeout_s) if sources else None
+    return PluginHooks(sandbox, sources, defined, workspace, baseline, timeout_s) if sources else None
 
 
 # ---------------------------------------------------------------------------
@@ -580,34 +589,46 @@ def run_agent_loop(llm: LLM, role: str, system: str, task: str, tools: list[Tool
 # One rollout: e ~ A(q; M, H)
 # ---------------------------------------------------------------------------
 
-def prepare_workspace(workspace: Path, source_dir: Path, harness: Harness) -> None:
-    """A fresh workspace: the task's inputs in source/, an empty output/, and the
-    harness's scripts at their own paths so text that names them is right.
-    Skill bodies and plugins stay out: they reach the agent only through tools and hooks."""
+def _digests(root: Path) -> dict[str, str]:
+    return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def changed_files(workspace: Path, baseline: Mapping[str, str]) -> list[str]:
+    """Files the agent created or changed since `baseline`: what it produced,
+    wherever the task asked for it (WorkBuddy captures a git diff the same way)."""
+    return [path for path, digest in _digests(workspace).items() if baseline.get(path) != digest]
+
+
+def prepare_workspace(workspace: Path, files_dir: Path, harness: Harness) -> dict[str, str]:
+    """A fresh workspace: the task's files at their own paths (where they are is
+    up to the benchmark, and its reference instructions say so), plus the
+    harness's scripts at theirs, so text that names them is right. Skill bodies
+    and plugins stay out: they reach the agent only through tools and hooks.
+    Returns the starting state, to tell later what the agent produced."""
     if workspace.exists() and any(workspace.iterdir()):
         raise FileExistsError(f"{workspace} is not empty; every rollout starts fresh")
-    shutil.copytree(source_dir, workspace / "source")
-    (workspace / "output").mkdir()
+    shutil.copytree(files_dir, workspace, dirs_exist_ok=True)
     for path, text in harness.files.items():
         if SCRIPT_FILE.fullmatch(path) or SKILL_SCRIPT.fullmatch(path):
             (workspace / path).parent.mkdir(parents=True, exist_ok=True)
             (workspace / path).write_text(text, encoding="utf-8")
+    return _digests(workspace)
 
 
-def execute(llm: LLM, sandbox: Sandbox, harness: Harness, task: str, source_dir: Path, workspace: Path,
+def execute(llm: LLM, sandbox: Sandbox, harness: Harness, task: str, files_dir: Path, workspace: Path,
             limits: RolloutLimits, *, label: str) -> ExecutionRecord:
     """Run the agent once on a task and record what it did and produced."""
     if errors := validate(harness):
         raise ValueError("refusing to run an invalid harness: " + "; ".join(errors))
-    prepare_workspace(workspace, source_dir, harness)
+    baseline = prepare_workspace(workspace, files_dir, harness)
     tools = [*file_tools(workspace, workspace), run_python_tool(sandbox, workspace, limits.tool_timeout_s)]
     tools += [t for t in (skill_tool(harness), subagent_tool(llm, sandbox, harness, workspace, limits)) if t]
-    hooks = plugin_hooks(harness, sandbox, workspace, limits.tool_timeout_s)
+    hooks = plugin_hooks(harness, sandbox, workspace, baseline, limits.tool_timeout_s)
     result = run_agent_loop(llm, "executor", harness.always_on_text(), task, tools,
                             max_turns=limits.max_turns, hooks=hooks)
-    output = workspace / "output"
-    deliverable = {p.relative_to(output).as_posix(): p.read_text(encoding="utf-8", errors="replace")
-                   for p in sorted(output.rglob("*")) if p.is_file()}
+    deliverable = {path: (workspace / path).read_text(encoding="utf-8", errors="replace")
+                   for path in changed_files(workspace, baseline)}
     return ExecutionRecord(label, harness, result.steps, deliverable, result.final_text,
                            result.stop_reason, result.hook_errors, workspace)
 
@@ -640,5 +661,5 @@ def render_record(record: ExecutionRecord) -> str:
             f"{record.tool_calls} tool calls ({record.tool_errors} errors).")
     if record.hook_errors:
         head += "\nPlugin errors: " + "; ".join(record.hook_errors)
-    files = "\n".join(f"- output/{p} ({len(t)} chars)" for p, t in record.deliverable.items()) or "- (none)"
+    files = "\n".join(f"- {p} ({len(t)} chars)" for p, t in record.deliverable.items()) or "- (none)"
     return f"{head}\n\nDeliverable:\n{files}\n\n## Trajectory\n\n{render_trajectory(record.steps)}"

@@ -60,15 +60,15 @@ EXAMPLE_FILES = {
     ),
     "plugin/require_output.py": (
         "def before_finish(event):\n"
-        "    if not event['output_files']:\n"
+        "    if not event['changed_files']:\n"
         "        return 'output/ is empty. Write the deliverable before finishing.'\n"
     ),
 }
 
 run_dir = config.RUNS_DIR / time.strftime("demo_l2_%Y%m%d-%H%M%S")
-source = run_dir / "task_source"
-source.mkdir(parents=True)
-(source / "sales.csv").write_text(SALES)
+files = run_dir / "task_files"   # the workspace a rollout starts from
+(files / "source").mkdir(parents=True)
+(files / "source" / "sales.csv").write_text(SALES)
 
 h0, _ = load_harness(config.BASE_HARNESS_DIR)
 harnesses = {"base": h0, "example": Harness({**h0.files, **EXAMPLE_FILES})}
@@ -77,7 +77,7 @@ llm = LLM.from_env(config.LLM_SETTINGS)
 sandbox = Sandbox.from_docker(config.SANDBOX)
 print(f"Task: {TASK}\n\nExpected (worked out by hand):\n{EXPECTED}")
 for label, harness in harnesses.items():
-    record = execute(llm, sandbox, harness, TASK, source, run_dir / label, config.ROLLOUT_LIMITS, label=label)
+    record = execute(llm, sandbox, harness, TASK, files, run_dir / label, config.ROLLOUT_LIMITS, label=label)
     (run_dir / f"{label}.md").write_text(render_record(record))
     used = sorted({c.name for s in record.steps for c in s.calls})
     print(f"=== {label} harness: {record.stop_reason}, {record.turns} turns, "
@@ -88,7 +88,7 @@ for label, harness in harnesses.items():
         print(f"plugin nudges: {nudges}")
     for path, content in record.deliverable.items():
         verdict = "matches" if content.replace("\r\n", "\n") == EXPECTED else "differs from"
-        print(f"output/{path} ({verdict} the expected answer):\n{content}")
+        print(f"{path} ({verdict} the expected answer):\n{content}")
     if not record.deliverable:
         print("(no deliverable)")
     print(f"full trajectory: {(run_dir / f'{label}.md').relative_to(config.ROOT)}\n")

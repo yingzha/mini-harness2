@@ -68,7 +68,7 @@ class SandboxSettings:
 # for every improvement session: editors, composer, selector, reflector.
 # We mirror that split with a cheap executor and a strong editor.
 # ---------------------------------------------------------------------------
-_EXECUTOR = RoleSpec(model="claude-haiku-5-5", effort="medium")
+_EXECUTOR = RoleSpec(model="claude-haiku-5-5", effort="low")
 _EDITOR = RoleSpec(model="claude-opus-5-5", effort="high")
 
 LLM_SETTINGS = LLMSettings(
@@ -110,3 +110,5 @@ SANDBOX = SandboxSettings(image="mini-harness2", user="app", memory="512m", pids
 ROOT = Path(__file__).resolve().parent
 BASE_HARNESS_DIR = ROOT / "base_harness"
 RUNS_DIR = ROOT / "runs"
+# The real WorkBuddy-Bench Office task we test with, if you have it (git-ignored; see README)
+WORKBUDDY_TASK = ROOT / "data" / "wb-bench-office-v1.0" / "tasks" / "service-channel-ticket-daily"

@@ -123,15 +123,6 @@ MUTATIONS = [
         "expect": "test_plugin_notes_reach_the_model_and_nudges_are_bounded",
     },
     {
-        "label": "hooks told no output files",
-        "file": "steps/s02_executor.py",
-        "replace": [
-            ("for p in output_dir.rglob(\"*\") if p.is_file())}",
-             "for p in output_dir.rglob(\"*\") if False)}"),
-        ],
-        "expect": "test_plugin_notes_reach_the_model_and_nudges_are_bounded",
-    },
-    {
         "label": "crashing hook is fatal",
         "file": "steps/s02_executor.py",
         "replace": [
@@ -200,15 +191,6 @@ MUTATIONS = [
         "replace": [
             ("harness.always_on_text(), task, tools,",
              "\"\", task, tools,"),
-        ],
-        "expect": "test_execute_records_the_deliverable_and_stats",
-    },
-    {
-        "label": "deliverable not captured",
-        "file": "steps/s02_executor.py",
-        "replace": [
-            ("for p in sorted(output.rglob(\"*\")) if p.is_file()}",
-             "for p in sorted(output.rglob(\"*\")) if False}"),
         ],
         "expect": "test_execute_records_the_deliverable_and_stats",
     },
@@ -499,6 +481,51 @@ MUTATIONS = [
              "            pass\n"),
         ],
         "expect": "test_plugin_notes_reach_the_model_and_nudges_are_bounded",
+    },
+    {
+        "label": "deliverable includes untouched files",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("if baseline.get(path) != digest]",
+             "if True]"),
+        ],
+        "expect": "test_execute_records_the_deliverable_and_stats",
+    },
+    {
+        "label": "deliverable not captured",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("                   for path in changed_files(workspace, baseline)}",
+             "                   for path in []}"),
+        ],
+        "expect": "test_execute_records_the_deliverable_and_stats",
+    },
+    {
+        "label": "hooks told nothing changed",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("\"changed_files\": changed_files(self._workspace, self._baseline)}",
+             "\"changed_files\": []}"),
+        ],
+        "expect": "test_plugin_notes_reach_the_model_and_nudges_are_bounded",
+    },
+    {
+        "label": "extra mounts writable",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("dst={dst},readonly\")",
+             "dst={dst}\")"),
+        ],
+        "expect": "test_an_agent_cannot_grade_itself",
+    },
+    {
+        "label": "environment variables dropped",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("*more, *variables,",
+             "*more,"),
+        ],
+        "expect": "test_its_own_checks_grade_the_workspace",
     },
     {
         "label": "equivalent: half = int(limit / 2)",

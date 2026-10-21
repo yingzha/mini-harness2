@@ -1,0 +1,44 @@
+"""Bugs to plant in benchmarks/workbuddy.py, each with the test that must catch it.
+
+Run with: python -m tools.mutate tests/mutations/workbuddy.py
+A control (expect=None) changes nothing observable, so no test may fail for it.
+"""
+
+MUTATIONS = [
+    {
+        "label": "workspace also mounted where their glue looks first",
+        "file": "benchmarks/workbuddy.py",
+        "replace": [
+            ("readonly={\"/tests\": tests}",
+             "readonly={\"/tests\": tests, \"/workspace\": workspace}"),
+        ],
+        "expect": "test_an_agent_cannot_grade_itself",
+    },
+    {
+        "label": "deliverable path not redirected",
+        "file": "benchmarks/workbuddy.py",
+        "replace": [
+            ("    if default:\n",
+             "    if False:\n"),
+        ],
+        "expect": "test_its_own_checks_grade_the_workspace",
+    },
+    {
+        "label": "check list cut at the tool-output size",
+        "file": "benchmarks/workbuddy.py",
+        "replace": [
+            (", max_output=2_000_000)",
+             ")"),
+        ],
+        "expect": "test_its_own_checks_grade_the_workspace",
+    },
+    {
+        "label": "the whole task folder handed over",
+        "file": "benchmarks/workbuddy.py",
+        "replace": [
+            ("if m.isfile()}",
+             "if m.isfile()} | {str(p.relative_to(folder)): p.read_bytes() for p in folder.rglob('*') if p.is_file()}"),
+        ],
+        "expect": "test_a_task_is_its_request_and_starting_files_only",
+    },
+]

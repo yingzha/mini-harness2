@@ -68,7 +68,6 @@ def test_meter_costs_follow_reported_usage():
     assert usage["executor"].cost_usd == pytest.approx((1000 * 1 + 500 * 2 + 2000 * 1) / 1e6)
     assert usage["editor"].cost_usd == pytest.approx((100 * 10 + 10 * 20 + 1000 * 1 + 200 * 12.5) / 1e6)
     assert usage["editor"].cache_read_tokens == 1000
-    assert llm.meter.total_cost == pytest.approx(usage["executor"].cost_usd + usage["editor"].cost_usd)
 
 
 def test_fallback_served_by_an_unpriced_model_does_not_crash_the_run():
@@ -78,7 +77,7 @@ def test_fallback_served_by_an_unpriced_model_does_not_crash_the_run():
     api = ScriptedAPI([reply(text("ok"), model="claude-opus-4-8", input_tokens=0, output_tokens=1_000_000)])
     llm = LLM(api.client(), SETTINGS)
     llm.call("editor", "sys", USER)
-    assert llm.meter.total_cost == pytest.approx(SETTINGS.prices[EDITOR].output)
+    assert llm.meter.snapshot()["editor"].cost_usd == pytest.approx(SETTINGS.prices[EDITOR].output)
 
 
 def test_long_prompt_tier_starts_strictly_above_threshold_and_counts_cached_tokens():

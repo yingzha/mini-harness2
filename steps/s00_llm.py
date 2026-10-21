@@ -147,10 +147,6 @@ class UsageMeter:
         with self._lock:
             return {role: dataclasses.replace(r) for role, r in self._by_role.items()}
 
-    @property
-    def total_cost(self) -> float:
-        return sum(r.cost_usd for r in self.snapshot().values())
-
     def report(self) -> str:
         snap = self.snapshot()
         rows = [f"{'role':<10} {'calls':>5} {'in':>9} {'out':>8} {'cache_rd':>9} {'cache_wr':>9} {'$':>8}"]

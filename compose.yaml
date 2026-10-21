@@ -21,9 +21,7 @@ services:
       # Hide the key file (the SDK gets the key via env_file).
       - /dev/null:/app/.env:ro
       # Only the data the pipeline produces is writable.
-      - ./tasks:/app/tasks
       - ./runs:/app/runs
-      - ./library:/app/library
       - scratch:/scratch
       # Lets our code start sandbox containers. Whoever can use this socket controls
       # Docker, which is why model-written code never runs in this container.

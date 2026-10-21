@@ -48,9 +48,10 @@ def tool_results(api: ScriptedAPI, request: int) -> list[dict]:
 
 @pytest.fixture
 def source(tmp_path) -> Path:
+    """A task's files, as write_task lays them out: here, one input under source/."""
     src = tmp_path / "src"
-    src.mkdir()
-    (src / "data.csv").write_text("id,amount\n1,$5\n")
+    (src / "source").mkdir(parents=True)
+    (src / "source" / "data.csv").write_text("id,amount\n1,$5\n")
     return src
 
 
@@ -336,7 +337,7 @@ WATCH = (
     "    subprocess.run([sys.executable, '-c', 'print(1)'])\n"
     "    return f\"checked {event['tool']}\"\n"
     "def before_finish(event):\n"
-    "    if not event['output_files']:\n"
+    "    if not event['changed_files']:\n"
     "        return 'output/ is empty: write the deliverable before finishing.'\n"
 )
 
@@ -370,7 +371,7 @@ def test_a_broken_plugin_is_recorded_and_the_rollout_continues(sandbox, tmp_path
         "plugin/slow.py": "import time\ndef before_finish(event):\n    time.sleep(30)\n",
         "plugin/wrong.py": "def after_tool(event):\n    return 42\n",
         "plugin/quits.py": "import sys\ndef after_tool(event):\n    sys.exit(0)\n",
-        "plugin/meddle.py": "def after_tool(event):\n    open('output/forged.csv', 'w').write('x')\n",
+        "plugin/meddle.py": "def after_tool(event):\n    open('forged.csv', 'w').write('x')\n",
     })
     llm, _ = scripted(calls(tool_use("t1", "list_files", {})), done())
     record = execute(llm, sandbox, harness, "task", source, tmp_path / "ws", RolloutLimits(6, 3, 1), label="b")
@@ -436,7 +437,6 @@ def test_workspace_has_inputs_and_scripts_but_not_skill_text_or_plugins(tmp_path
     prepare_workspace(ws, source, harness)
     assert sorted(p.relative_to(ws).as_posix() for p in ws.rglob("*") if p.is_file()) == [
         "scripts/check.py", "skills/money/scripts/parse.py", "source/data.csv"]
-    assert (ws / "output").is_dir()
 
     used = tmp_path / "used"
     used.mkdir()
@@ -446,16 +446,20 @@ def test_workspace_has_inputs_and_scripts_but_not_skill_text_or_plugins(tmp_path
 
 
 def test_execute_records_the_deliverable_and_stats(sandbox, tmp_path, source):
-    """Guards: the deliverable y missing what the agent wrote, the harness not
-    actually reaching the model, and wrong Table 7 statistics."""
+    """Guards: the deliverable y missing what the agent wrote (including a
+    report at the workspace root, where the real task wants it), or padded
+    with the task's untouched inputs and the harness's own scripts; the
+    harness not actually reaching the model; and wrong Table 7 statistics."""
+    harness = Harness({**H0.files, "scripts/check.py": "print('ok')"})
     llm, api = scripted(
         calls(tool_use("t1", "write_file", {"path": "output/summary.csv", "content": "id,amount\n1,5\n"}),
-              tool_use("t2", "read_file", {"path": "nope.csv"})),
-        done("Wrote output/summary.csv"))
-    record = execute(llm, sandbox, H0, "Sum the amounts.", source, tmp_path / "ws", LIMITS, label="base_1")
-    assert record.deliverable == {"summary.csv": "id,amount\n1,5\n"}
-    assert (record.turns, record.tool_calls, record.tool_errors) == (2, 2, 1)
-    assert api.requests[0].body["system"] == H0.always_on_text()
+              tool_use("t2", "write_file", {"path": "report.md", "content": "# Report"}),
+              tool_use("t3", "read_file", {"path": "nope.csv"})),
+        done("Wrote the summary and the report"))
+    record = execute(llm, sandbox, harness, "Sum the amounts.", source, tmp_path / "ws", LIMITS, label="base_1")
+    assert record.deliverable == {"output/summary.csv": "id,amount\n1,5\n", "report.md": "# Report"}
+    assert (record.turns, record.tool_calls, record.tool_errors) == (2, 3, 1)
+    assert api.requests[0].body["system"] == harness.always_on_text()
     assert api.requests[0].body["messages"][0]["content"] == "Sum the amounts."
     assert "[ERROR]" in render_record(record)
 

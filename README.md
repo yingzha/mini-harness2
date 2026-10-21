@@ -23,7 +23,7 @@ docker compose run --rm app                                          # test suit
 docker compose run --rm app uv run --frozen python -m demos.d00_llm  # a lesson's demo
 ```
 
-Live runs from Lesson 4 on take half an hour or more. On a Mac, put `caffeinate -is` in front of the command, or the machine may sleep and drop the API connection mid-run.
+Live runs from Lesson 4 on can take half an hour. On a Mac, put `caffeinate -is` in front of the command, or the machine may sleep and drop the API connection mid-run.
 
 If your API key isn't scoped to a workspace, also set `ANTHROPIC_WORKSPACE_ID` in `.env`. On a Linux host, change `group_add` in [compose.yaml](compose.yaml) to the group id of `/var/run/docker.sock`.
 
@@ -92,8 +92,8 @@ Read the lessons in order. Each `steps/sNN_*.py` opens with the paper section it
 | L1 | [steps/s01_harness.py](steps/s01_harness.py) | §2.1, Table 5, §D.1-D.2, Prompt 1 rules | The harness as an immutable value: 8 components on an editable surface, H₀ in [base_harness/](base_harness/), `validate`, `diff`, load/write | `python -m demos.d01_harness` |
 | L2 | [steps/s02_executor.py](steps/s02_executor.py) | §2.1 A(q; M, H), §2.2.1 e = (τ, y), Table 5 activation, Table 7 | The agent loop, file and `run_python` tools, `load_skill`, `run_subagent`, plugin hooks, the execution record, and the sandbox that model-written code runs in | `python -m demos.d02_executor` (live, about $0.01) |
 | L3 | [steps/s03_tasks.py](steps/s03_tasks.py), [benchmarks/workbuddy.py](benchmarks/workbuddy.py) | §2.1 the task stream, §D.1 H₀, Appendix B grading | A task is a request plus files; H₀ is the stock harness plus the benchmark's reference instructions; the deliverable is whatever the agent created or changed; a real task's own checks give the score (the fraction that pass), which the method itself never sees | `python -m demos.d03_tasks` (no API calls), then `--live` (H₀ on the task, about 2 cents) |
-| L4 | [steps/s04_propose.py](steps/s04_propose.py), [prompts/](prompts/) | §2.2.1 Propose, §D.2 sessions, Prompts 1-2 | Two editors (INV: how the agent works; DOM: what a practitioner knows) each get the evidence as files in `context/` and edit their own copy of the harness; the files they leave are the candidate. An invalid tree goes back once with the validator's message, then falls back to the starting tree | `python -m demos.d04_propose` (no API calls), then `--live` (H₀ once, then both editors: Opus, about $2.50 and 30 minutes) |
-| L5 | s05_probe | §2.2.1 Probe | | |
+| L4 | [steps/s04_propose.py](steps/s04_propose.py), [prompts/](prompts/) | §2.2.1 Propose, §D.2 sessions, Prompts 1-2 | Two editors (INV: how the agent works; DOM: what a practitioner knows) each get the evidence as files in `context/` and edit their own copy of the harness; the files they leave are the candidate. An invalid tree goes back once with the validator's message, then falls back to the starting tree | `python -m demos.d04_propose` (no API calls), then `--live` (H₀ once, then both editors: Opus, about $2.50 and 5 to 30 minutes) |
+| L5 | [steps/s05_probe.py](steps/s05_probe.py) | §2.2.1 Probe | Each candidate runs once on the same task, side by side, under matched conditions (same model, files, limits; only the harness differs). A contrast lays a probe's run beside the reference's: run stats, which harness components it actually used, and a diff of the deliverables. Facts, never a verdict | `python -m demos.d05_probe` (reuses L4's candidates; H₀ and both candidates, a few cents) |
 | L6 | s06_compose | §2.2.1 Compose, Eq. 1, Prompts 3-4 | | |
 | L7 | s07_recursion | §2.2.2 Eq. 2-3, Prompt 5 | | |
 | L8 | s08_library | §2.3 Eq. 4, Prompt 6 | | |

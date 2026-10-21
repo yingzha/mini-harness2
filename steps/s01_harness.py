@@ -236,9 +236,14 @@ def _code_compiles_and_plugins_hook_in(harness: Harness) -> list[str]:
 
 def diff(old: Harness, new: Harness) -> str:
     """A unified diff over the whole tree, including added, removed and empty files."""
+    return diff_files(old.files, new.files)
+
+
+def diff_files(old: Mapping[str, str], new: Mapping[str, str]) -> str:
+    """The same, for any two trees of text files (Lesson 5 diffs deliverables)."""
     out: list[str] = []
-    for path in sorted(old.files.keys() | new.files.keys()):
-        a, b = old.files.get(path), new.files.get(path)
+    for path in sorted(old.keys() | new.keys()):
+        a, b = old.get(path), new.get(path)
         if a == b:
             continue
         out.append(f"--- {'a/' + path if a is not None else '/dev/null'}\n")

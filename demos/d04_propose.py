@@ -2,7 +2,7 @@
 real task, and each proposes a changed harness.
 
     python -m demos.d04_propose          # what each editor is told (no API calls)
-    python -m demos.d04_propose --live   # run H0 once (Haiku), then the INV and DOM editors (Opus: about $2.50, 30 minutes)
+    python -m demos.d04_propose --live   # run H0 once (Haiku), then the INV and DOM editors (Opus: about $2.50, 5 to 30 minutes)
 
 A live run is kept under runs/demo_l4_<time>/:
   h0/                         the reference run: workspace/ and trajectory.md
@@ -49,7 +49,7 @@ ref = execute(llm, sandbox, h0, task.prompt, files, run_dir / "h0" / "workspace"
 print(f"H0: {ref.stop_reason} after {ref.turns} turns, {ref.tool_calls} tool calls ({ref.tool_errors} errors); "
       f"produced {', '.join(ref.deliverable) or 'nothing'}")
 
-print("\nNow the INV and DOM editors, side by side (Opus; about 30 minutes, "
+print("\nNow the INV and DOM editors, side by side (Opus; 5 to 30 minutes, "
       "and nothing prints until both finish)...", flush=True)
 editors = run_dir / "editors"
 with ThreadPoolExecutor(len(SCOPES)) as pool:

@@ -23,6 +23,8 @@ docker compose run --rm app                                          # test suit
 docker compose run --rm app uv run --frozen python -m demos.d00_llm  # a lesson's demo
 ```
 
+Live runs from Lesson 4 on take half an hour or more. On a Mac, put `caffeinate -is` in front of the command, or the machine may sleep and drop the API connection mid-run.
+
 If your API key isn't scoped to a workspace, also set `ANTHROPIC_WORKSPACE_ID` in `.env`. On a Linux host, change `group_add` in [compose.yaml](compose.yaml) to the group id of `/var/run/docker.sock`.
 
 From Lesson 3 on, the demos run one real task from WorkBuddy-Bench Office (`wb-bench-office-v1.0`), which is not part of this repository. Copy that task into `data/`; it is git-ignored, since it holds the task's gold answers:
@@ -59,6 +61,7 @@ If a run is killed mid-call, its sandbox may survive. `docker rm -f $(docker ps 
 
 - `steps/sNN_*.py`: one lesson each. Pure library code with no globals, no CLI and no side effects on import. Dependencies (such as the `LLM` gateway) are passed in explicitly.
 - `base_harness/`: H₀'s stock files, the harness every task starts from.
+- `prompts/`: the improver's prompts (Appendix H), adapted to this runtime. Read [prompts/editor.md](prompts/editor.md) to see exactly what an editor is told.
 - `benchmarks/`: real tasks to run the method on, and the benchmark's own way of grading them. [benchmarks/workbuddy.py](benchmarks/workbuddy.py) loads a WorkBuddy-Bench task and runs its checks. Nothing in `steps/` imports from here; entry points pick a task and pass it in.
 - `data/`: datasets you download (git-ignored; see Running).
 - `runs/`: what demos and runs leave behind: workspaces, trajectories, grades (git-ignored).
@@ -89,7 +92,7 @@ Read the lessons in order. Each `steps/sNN_*.py` opens with the paper section it
 | L1 | [steps/s01_harness.py](steps/s01_harness.py) | §2.1, Table 5, §D.1-D.2, Prompt 1 rules | The harness as an immutable value: 8 components on an editable surface, H₀ in [base_harness/](base_harness/), `validate`, `diff`, load/write | `python -m demos.d01_harness` |
 | L2 | [steps/s02_executor.py](steps/s02_executor.py) | §2.1 A(q; M, H), §2.2.1 e = (τ, y), Table 5 activation, Table 7 | The agent loop, file and `run_python` tools, `load_skill`, `run_subagent`, plugin hooks, the execution record, and the sandbox that model-written code runs in | `python -m demos.d02_executor` (live, about $0.01) |
 | L3 | [steps/s03_tasks.py](steps/s03_tasks.py), [benchmarks/workbuddy.py](benchmarks/workbuddy.py) | §2.1 the task stream, §D.1 H₀, Appendix B grading | A task is a request plus files; H₀ is the stock harness plus the benchmark's reference instructions; the deliverable is whatever the agent created or changed; a real task's own checks give the score (the fraction that pass), which the method itself never sees | `python -m demos.d03_tasks` (no API calls), then `--live` (H₀ on the task, about 2 cents) |
-| L4 | s04_propose | §2.2.1 Propose, Prompts 1-2 | | |
+| L4 | [steps/s04_propose.py](steps/s04_propose.py), [prompts/](prompts/) | §2.2.1 Propose, §D.2 sessions, Prompts 1-2 | Two editors (INV: how the agent works; DOM: what a practitioner knows) each get the evidence as files in `context/` and edit their own copy of the harness; the files they leave are the candidate. An invalid tree goes back once with the validator's message, then falls back to the starting tree | `python -m demos.d04_propose` (no API calls), then `--live` (H₀ once, then both editors: Opus, about $2.50 and 30 minutes) |
 | L5 | s05_probe | §2.2.1 Probe | | |
 | L6 | s06_compose | §2.2.1 Compose, Eq. 1, Prompts 3-4 | | |
 | L7 | s07_recursion | §2.2.2 Eq. 2-3, Prompt 5 | | |
@@ -108,5 +111,10 @@ Each one follows from the same question: does the rule guard a failure that can 
 - **Two plugin hooks:** `after_tool` (append a note to a tool result) and `before_finish` (keep the agent working, at most twice). Subagents can't delegate again and don't run plugins.
 - **One real task instead of three benchmarks.** We test with WorkBuddy-Bench Office's `service-channel-ticket-daily` (a daily ticket report from a CSV export, a JSON snapshot and a guidance document); the paper runs every test task of WorkBuddy-Bench, JobBench and LAB, three times each.
 - **Deterministic checks only.** The task's score is the fraction of its own 273 checks that pass. Its LLM-judge rubrics (20% of the benchmark's full score for this task) are not run.
+
+- **The editor prompts are adapted to this runtime**, rule for rule: Python plugins with our two hooks, scripts run with `run_python`, the two validation rules that apply here, and no benchmark-specific block (H₀'s reference instructions are already in the harness the editor reads). Plugin shapes our hooks can't do (trimming or capping a tool's output) are left out.
+- **No folder guard for grades.** The paper refuses any session folder holding a verdict, rubric or score. Here an editor's folder is built only from a task, a harness and execution records, none of which can hold one.
+- **Editor sessions are capped at 60 turns** (the paper sets no cap); a session that hits the cap falls back to its starting tree, like an invalid one.
+- **The library is empty until Lesson 8**, so editors see an empty `context/library/`, as on the first task of a stream.
 
 Filled in further as lessons land.

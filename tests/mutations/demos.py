@@ -32,4 +32,13 @@ MUTATIONS = [
         ],
         "expect": "test_offline_demo_runs[d01_harness]",
     },
+    {
+        "label": "d04 reads a prompt file that was renamed",
+        "file": "demos/d04_propose.py",
+        "replace": [
+            ('dom = (config.PROMPTS_DIR / "editor_dom.md").read_text()',
+             'dom = (config.PROMPTS_DIR / "editor_domain.md").read_text()'),
+        ],
+        "expect": "test_offline_demo_runs[d04_propose]",
+    },
 ]

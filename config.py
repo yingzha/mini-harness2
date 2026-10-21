@@ -99,6 +99,10 @@ LLM_SETTINGS = LLMSettings(
 # ---------------------------------------------------------------------------
 ROLLOUT_LIMITS = RolloutLimits(max_turns=40, subagent_max_turns=20, tool_timeout_s=60)
 
+# Turns per improvement session (editor, composer, ...): reading the evidence
+# and editing the harness. The paper doesn't cap them.
+IMPROVER_MAX_TURNS = 60
+
 # ---------------------------------------------------------------------------
 # Sandbox for model-written code: a fresh container per call (see s02)
 # ---------------------------------------------------------------------------
@@ -109,6 +113,7 @@ SANDBOX = SandboxSettings(image="mini-harness2", user="app", memory="512m", pids
 # ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent
 BASE_HARNESS_DIR = ROOT / "base_harness"
+PROMPTS_DIR = ROOT / "prompts"   # the improver's prompts (Appendix H)
 RUNS_DIR = ROOT / "runs"
 # The real WorkBuddy-Bench Office task we test with, if you have it (git-ignored; see README)
 WORKBUDDY_TASK = ROOT / "data" / "wb-bench-office-v1.0" / "tasks" / "service-channel-ticket-daily"

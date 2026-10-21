@@ -15,7 +15,7 @@ Paper anchors
 Design
 ------
 * `run_agent_loop` is the generic tool-use loop. Lesson 4 reuses it for the
-  harness editors, with different tools and no plugins.
+  harness editors, with different tools and a validation hook instead of plugins.
 * A `Tool` is a value: the schema the model sees plus the handler we run.
   `file_tools(read_root, write_root)` builds file tools for any folder.
 * Code the model writes (run_python, plugin hooks) runs in a `Sandbox`: a fresh

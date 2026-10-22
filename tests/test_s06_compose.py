@@ -38,8 +38,9 @@ def test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly(tmp_p
     editor's reasons, its run, or how that run compares with the reference),
     so it can't check the moment an editor cites; a candidate that fell
     back read as if its notes described its tree, a component taken over by
-    anything but an exact copy into the composer's own harness, and the
-    composer's spend counted as an editor's."""
+    anything but an exact copy into the composer's own harness, the composer
+    not reading the library (§2.3: experience "also informs ... Compose"), and
+    the composer's spend counted as an editor's."""
     api = ScriptedAPI([
         reply(tool_use("c1", "copy_file", {"source": "context/candidates/inv1/harness/guardrails.md",
                                             "target": "context/harness/guardrails.md"}),
@@ -49,7 +50,10 @@ def test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly(tmp_p
         reply(text("<notes>kept -> inv1 guardrails.md -> h0 never reopened its report</notes>"), model=EDITOR)])
     llm = LLM(api.client(), config.LLM_SETTINGS)
     probes = {"inv1": record("inv1", INV.harness, {"report.md": "total 6\n"}), "dom1": record("dom1", H0, {})}
-    composed = compose(llm, "mission", TASK, H0, [REF], [INV, DOM], probes, tmp_path, max_turns=3,
+    library = tmp_path / "library"
+    library.mkdir()
+    (library / "index.md").write_text("- entries/earlier-task/: changed guardrails.md. Cue: totals typed into prose\n")
+    composed = compose(llm, "mission", TASK, H0, [REF], [INV, DOM], probes, tmp_path, library=library, max_turns=3,
                        label="composed1")
 
     candidates = tmp_path / "context" / "candidates"
@@ -58,6 +62,7 @@ def test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly(tmp_p
     assert "| deliverable | report.md (8 chars) | NOTHING |" in (candidates / "dom1" / "contrast-h0.md").read_text()
     assert (candidates / "inv1" / "notes.md").read_text() == INV.notes
     assert "fell back" in (candidates / "dom1" / "notes.md").read_text()
+    assert (tmp_path / "context" / "library" / "index.md").read_text() == (library / "index.md").read_text()
     assert [r["is_error"] for r in api.requests[1].body["messages"][-1]["content"]] == [False, True]
     assert composed.harness == INV.harness and not composed.fallback
     assert set(llm.meter.snapshot()) == {"composer"}
@@ -77,7 +82,8 @@ def test_a_contrastive_step_runs_the_harness_it_composed(sandbox, tmp_path):
         reply(text("<notes>revised -> guardrails.md -> h0 never reopened its report</notes>"), model=EDITOR),
         ran])         # the successor
     xi = contrastive_step(LLM(api.client(), config.LLM_SETTINGS), sandbox, TASK, H0, [REF], tmp_path,
-                          k=1, prompts_dir=config.PROMPTS_DIR, limits=LIMITS, max_turns=3)
+                          k=1, library=tmp_path / "no-library", prompts_dir=config.PROMPTS_DIR, limits=LIMITS,
+                          max_turns=3)
 
     assert set(xi.probes) == {c.label for c in xi.candidates} == {"inv1", "dom1"}
     [composed] = xi.composed

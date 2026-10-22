@@ -9,7 +9,7 @@ Everything is in files under `context/`; read them with your tools.
 - `context/task.md` and `context/files/`: the task, exactly as the agent received it.
 - `context/harness/`: the harness the agent ran with. This is your copy to edit.
 - `context/rollouts/<label>/`: each run of that harness on this task. `trajectory.md` holds every turn, tool call and result; `deliverable/` holds every file the run created or changed.
-- `context/library/`: finished harnesses from earlier tasks (it may be empty).
+- `context/library/`: what earlier tasks in this domain left (it may be empty). `index.md` lists the entries; each `entries/<task>/` holds the harness that task adopted (`harness/`) and `EXPERIENCE.md`: what each edit did there, and the lesson it supported, if any.
 
 Your tools are list_files, read_file, write_file, copy_file and delete_file. You can read anything under `context/`, write, copy into and delete only under `context/harness/`, and you cannot run code.
 

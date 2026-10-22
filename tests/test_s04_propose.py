@@ -55,7 +55,7 @@ def test_an_editor_sees_the_evidence_and_edits_only_its_copy(tmp_path):
               write("context/harness/guardrails.md", RULE, "w2"),
               write("context/harness/skills/recheck/helper.py", "print(1)\n", "w3")),
         done("<notes>guardrails.md: h0 never reopened its report (turn 1)</notes>"))
-    c = propose(llm, "mission", TASK, H0, [REF], tmp_path, max_turns=4, label="inv1")
+    c = propose(llm, "mission", TASK, H0, [REF], tmp_path, library=tmp_path / "no-library", max_turns=4, label="inv1")
 
     results = api.requests[1].body["messages"][-1]["content"]
     assert results[0]["content"] == REPORT
@@ -76,7 +76,7 @@ def test_an_invalid_tree_goes_back_to_its_editor_once(tmp_path):
         done("<notes>added a skill</notes>"),
         calls(write("context/harness/guardrails.md", "Before finishing, load the `recheck` skill.\n")),
         done("<notes>added the recheck skill and its trigger line</notes>"))
-    c = propose(llm, "mission", TASK, H0, [REF], tmp_path, max_turns=6, label="inv1")
+    c = propose(llm, "mission", TASK, H0, [REF], tmp_path, library=tmp_path / "no-library", max_turns=6, label="inv1")
 
     assert "no trigger line" in api.requests[2].body["messages"][-1]["content"]
     assert "skills/recheck/SKILL.md" in c.harness.files and c.fallback == ""
@@ -89,9 +89,9 @@ def test_a_proposal_still_invalid_or_unfinished_falls_back_to_the_start(tmp_path
     its turn cap passing a half-made edit off as a proposal."""
     llm, _ = scripted(calls(write("context/harness/skills/recheck/SKILL.md", SKILL)),
                       done("<notes>a</notes>"), done("<notes>b</notes>"))
-    invalid = propose(llm, "mission", TASK, H0, [REF], tmp_path / "a", max_turns=6, label="inv1")
+    invalid = propose(llm, "mission", TASK, H0, [REF], tmp_path / "a", library=tmp_path / "no-library", max_turns=6, label="inv1")
     llm, _ = scripted(calls(write("context/harness/guardrails.md", RULE)))
-    unfinished = propose(llm, "mission", TASK, H0, [REF], tmp_path / "b", max_turns=1, label="inv1")
+    unfinished = propose(llm, "mission", TASK, H0, [REF], tmp_path / "b", library=tmp_path / "no-library", max_turns=1, label="inv1")
 
     assert invalid.harness == H0 and "no trigger line" in invalid.fallback
     assert unfinished.harness == H0 and "max_turns" in unfinished.fallback

@@ -13,7 +13,7 @@ MUTATIONS = [
     {
         "label": "the composer never sees a candidate's diff",
         "file": "steps/s06_compose.py",
-        "replace": [('(folder / "diff.patch").write_text(diff(harness, c.harness)', '(folder / "diff.patch").write_text(""')],
+        "replace": [('(folder / "diff.patch").write_text(diff(harness, candidate.harness)', '(folder / "diff.patch").write_text(""')],
         "expect": "test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly",
     },
     {
@@ -49,7 +49,7 @@ MUTATIONS = [
     {
         "label": "the composer never sees the editors' reasons",
         "file": "steps/s06_compose.py",
-        "replace": [('write_text(fell_back + (c.notes or "(no notes)")', 'write_text(fell_back + "(no notes)"')],
+        "replace": [('write_text(fell_back + (candidate.notes or "(no notes)")', 'write_text(fell_back + "(no notes)"')],
         "expect": "test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly",
     },
     {
@@ -63,5 +63,12 @@ MUTATIONS = [
         "file": "steps/s06_compose.py",
         "replace": [("composer_prompt(prompts_dir, j, k)", "composer_prompt(prompts_dir, 1, k)")],
         "expect": "test_parallel_recursion_adopts_the_harness_whose_output_is_delivered",
+    },
+    {
+        "label": "the composer never reads the library",
+        "file": "steps/s06_compose.py",
+        "replace": [("build_context(context, task, harness, refs, library)",
+                     'build_context(context, task, harness, refs, library / "missing")')],
+        "expect": "test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly",
     },
 ]

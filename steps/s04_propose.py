@@ -74,19 +74,23 @@ def editor_prompt(prompts_dir: Path, scope: str, i: int, k: int) -> str:
     return shared.format(dimension=dimension.strip(), rules=rules.strip(), i=i, k=k)
 
 
-def build_context(context: Path, task: Task, harness: Harness, refs: Sequence[ExecutionRecord]) -> None:
+def build_context(context: Path, task: Task, harness: Harness, refs: Sequence[ExecutionRecord],
+                  library: Path) -> None:
     """Lay out an editor's evidence as files:
 
         task.md, files/          the task, as the agent got it
         harness/                 the harness it ran with: the editor's copy
         rollouts/<label>/        each reference run: trajectory.md, deliverable/
-        library/                 finished harnesses from earlier tasks (filled from Lesson 8)
+        library/                 a copy of `library` (Lesson 8): earlier tasks' harnesses and lessons
     """
     write_task(task, context)
     write_harness(harness, context / "harness")
     for record in refs:
         write_rollout(record, context / "rollouts" / record.label)
-    (context / "library").mkdir()
+    if library.is_dir():   # a copy, so no session can change the real library
+        shutil.copytree(library, context / "library")
+    else:                  # the first task of a stream: nothing learned yet
+        (context / "library").mkdir()
 
 
 def write_rollout(record: ExecutionRecord, folder: Path) -> None:
@@ -157,10 +161,10 @@ def _invalid(harness_dir: Path) -> str | None:
 
 
 def propose(llm: LLM, system: str, task: Task, harness: Harness, refs: Sequence[ExecutionRecord],
-            session: Path, *, max_turns: int, label: str) -> Candidate:
+            session: Path, *, library: Path, max_turns: int, label: str) -> Candidate:
     """One editor session (system: from editor_prompt) on the evidence, in the
     folder `session`."""
-    build_context(session / "context", task, harness, refs)
+    build_context(session / "context", task, harness, refs, library)
     return edit_session(llm, "editor", system, harness, session, max_turns=max_turns, label=label)
 
 

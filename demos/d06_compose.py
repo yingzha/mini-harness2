@@ -48,7 +48,8 @@ ref = execute(llm, sandbox, h0, task.prompt, write_task(task, run_dir / "task"),
               config.ROLLOUT_LIMITS, label="h0")
 print("Now the step: editors, probes, composer, successor (10 to 45 minutes; nothing prints until it ends)...",
       flush=True)
-xi = contrastive_step(llm, sandbox, task, h0, [ref], run_dir / "step", k=1, prompts_dir=config.PROMPTS_DIR,
+xi = contrastive_step(llm, sandbox, task, h0, [ref], run_dir / "step", k=1, library=run_dir / "library",
+                      prompts_dir=config.PROMPTS_DIR,
                       limits=config.ROLLOUT_LIMITS, max_turns=config.IMPROVER_MAX_TURNS)
 
 for c in xi.candidates:

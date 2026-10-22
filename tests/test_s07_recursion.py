@@ -93,6 +93,7 @@ def test_parallel_recursion_adopts_the_harness_whose_output_is_delivered(sandbox
     want = next(id_ for id_, label in anonymize(pool, random.Random(0)).items() if label == "composed2")
     api = ScriptedAPI(routed(selector_picks=want))
     result = parallel_recursion(LLM(api.client(), config.LLM_SETTINGS), sandbox, TASK, H0, tmp_path, k=2,
+                                library=tmp_path / "no-library",
                                 prompts_dir=config.PROMPTS_DIR, limits=LIMITS, max_turns=3, rng=random.Random(0))
 
     assert sorted(c.label for c in result.step.candidates) == ["dom1", "dom2", "inv1", "inv2"]
@@ -108,6 +109,7 @@ def test_at_k_1_the_composed_harness_is_adopted_without_selection(sandbox, tmp_p
     the successor not being adopted there."""
     api = ScriptedAPI(routed())
     result = parallel_recursion(LLM(api.client(), config.LLM_SETTINGS), sandbox, TASK, H0, tmp_path, k=1,
+                                library=tmp_path / "no-library",
                                 prompts_dir=config.PROMPTS_DIR, limits=LIMITS, max_turns=3, rng=random.Random(0))
 
     assert result.selection is None and result.chosen == "composed1"

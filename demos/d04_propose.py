@@ -54,7 +54,8 @@ print("\nNow the INV and DOM editors, side by side (Opus; 5 to 30 minutes, "
 editors = run_dir / "editors"
 with ThreadPoolExecutor(len(SCOPES)) as pool:
     jobs = [pool.submit(propose, llm, editor_prompt(config.PROMPTS_DIR, scope, 1, 1), task, h0, [ref],
-                        editors / f"{scope}1", max_turns=config.IMPROVER_MAX_TURNS, label=f"{scope}1")
+                        editors / f"{scope}1", library=run_dir / "library", max_turns=config.IMPROVER_MAX_TURNS,
+                        label=f"{scope}1")
             for scope in SCOPES]
     candidates = [job.result() for job in jobs]
 

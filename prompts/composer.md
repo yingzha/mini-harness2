@@ -14,7 +14,7 @@ Everything is in files under `context/`; read them with your tools.
 - `context/harness/`: the current harness, unmodified. This is your copy: what you leave here is the composed harness.
 - `context/rollouts/<label>/`: each base rollout, a run of the current harness. `trajectory.md` holds every turn, tool call and result; `deliverable/` holds every file the run created or changed.
 - `context/candidates/<label>/`: each candidate (its label starts with inv or dom). `harness/` is its full tree, `diff.patch` its edits against the current harness, `notes.md` its editor's reasons, and `rollout/` its one run (`trajectory.md`, `deliverable/`). `contrast-<base>.md` sets that run beside a base rollout: run stats, the harness components the run actually used, and a diff of the deliverables. A contrast states facts, not a verdict.
-- `context/library/`: finished harnesses from earlier tasks (it may be empty).
+- `context/library/`: what earlier tasks in this domain left (it may be empty). `index.md` lists the entries; each `entries/<task>/` holds the harness that task adopted (`harness/`) and `EXPERIENCE.md`: what each edit did there, and the lesson it supported, if any.
 
 Your tools are list_files, read_file, write_file, copy_file and delete_file. You can read anything under `context/`, write, copy into and delete only under `context/harness/`, and you cannot run code. To take a candidate's file, copy it with copy_file rather than retyping it.
 

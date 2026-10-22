@@ -56,4 +56,11 @@ MUTATIONS = [
         "replace": [("print(selector_prompt(config.PROMPTS_DIR, 4))", "print(selector_prompt(config.PROMPTS_DIR))")],
         "expect": "test_offline_demo_runs[d07_recursion]",
     },
+    {
+        "label": "d08 imports a function that was renamed",
+        "file": "demos/d08_library.py",
+        "replace": [("from steps.s08_library import reflect, reflector_prompt, update_library",
+                     "from steps.s08_library import reflect, reflector_prompts, update_library")],
+        "expect": "test_offline_demo_runs[d08_library]",
+    },
 ]

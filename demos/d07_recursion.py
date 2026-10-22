@@ -44,7 +44,8 @@ sandbox = Sandbox.from_docker(config.SANDBOX)
 
 print(f"\nParallel recursion at k = {k}: {k} runs of H0, {2 * k} editors, {2 * k} probes, {k} composers, "
       f"{k} successor runs, then the selector. 15 to 60 minutes; nothing prints until it ends...", flush=True)
-result = parallel_recursion(llm, sandbox, task, h0, run_dir, k=k, prompts_dir=config.PROMPTS_DIR,
+result = parallel_recursion(llm, sandbox, task, h0, run_dir, k=k, library=run_dir / "library",
+                            prompts_dir=config.PROMPTS_DIR,
                             limits=config.ROLLOUT_LIMITS, max_turns=config.IMPROVER_MAX_TURNS, rng=random.Random())
 
 def changed(harness) -> int:

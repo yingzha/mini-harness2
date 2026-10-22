@@ -118,7 +118,8 @@ def select(llm: LLM, system: str, task: Task, outputs: Mapping[str, ExecutionRec
 
 
 def parallel_recursion(llm: LLM, sandbox: Sandbox, task: Task, harness: Harness, folder: Path, *, k: int,
-                       prompts_dir: Path, limits: RolloutLimits, max_turns: int, rng: random.Random) -> Recursion:
+                       library: Path, prompts_dir: Path, limits: RolloutLimits, max_turns: int,
+                       rng: random.Random) -> Recursion:
     """Eq. 2 and the final selection: k runs of `harness` (base1..k), the
     contrastive step k wide, then (for k > 1) a blind choice among the base
     runs and every composed harness's run. Everything is kept under `folder`."""
@@ -126,7 +127,7 @@ def parallel_recursion(llm: LLM, sandbox: Sandbox, task: Task, harness: Harness,
     base = probe(llm, sandbox, {f"base{i}": harness for i in range(1, k + 1)}, task.prompt, files,
                  folder / "base", limits)
     step = contrastive_step(llm, sandbox, task, harness, tuple(base.values()), folder / "step", k=k,
-                            prompts_dir=prompts_dir, limits=limits, max_turns=max_turns)
+                            library=library, prompts_dir=prompts_dir, limits=limits, max_turns=max_turns)
     if k == 1:
         [composed] = step.composed
         return Recursion(step, composed.label, composed.harness, None)

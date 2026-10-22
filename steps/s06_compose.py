@@ -62,49 +62,59 @@ def composer_prompt(prompts_dir: Path, j: int, k: int) -> str:
     return template.format(rules=rules.strip(), j=j, k=k)
 
 
+def write_candidate(folder: Path, harness: Harness, candidate: Candidate, run: ExecutionRecord,
+                    refs: Sequence[ExecutionRecord]) -> None:
+    """A candidate as evidence, against the harness it edited:
+
+        harness/               its full tree
+        diff.patch             its edits against `harness`
+        notes.md               its session's notes (an editor's reasons, a composer's decisions)
+        rollout/               its run
+        contrast-<ref>.md      that run beside each reference run
+    """
+    write_harness(candidate.harness, folder / "harness")
+    (folder / "diff.patch").write_text(diff(harness, candidate.harness), encoding="utf-8")
+    fell_back = f"This candidate fell back to the current harness: {candidate.fallback}\n\n" if candidate.fallback else ""
+    (folder / "notes.md").write_text(fell_back + (candidate.notes or "(no notes)"), encoding="utf-8")
+    write_rollout(run, folder / "rollout")
+    for ref in refs:
+        (folder / f"contrast-{ref.label}.md").write_text(contrast(ref, run), encoding="utf-8")
+
+
 def compose(llm: LLM, system: str, task: Task, harness: Harness, refs: Sequence[ExecutionRecord],
             candidates: Sequence[Candidate], probes: Mapping[str, ExecutionRecord], session: Path, *,
-            max_turns: int, label: str) -> Candidate:
+            library: Path, max_turns: int, label: str) -> Candidate:
     """One composer session (system: from composer_prompt) in the folder
-    `session`. Its evidence is the editors' plus, for each candidate:
-
-        candidates/<label>/harness/        its full tree
-        candidates/<label>/diff.patch      its edits against the current harness
-        candidates/<label>/notes.md        its editor's reasons
-        candidates/<label>/rollout/        its probe run
-        candidates/<label>/contrast-<ref>.md   that run beside each reference run
-    """
+    `session`. Its evidence is the editors', plus each candidate with its probe
+    run (write_candidate) under candidates/<label>/."""
     context = session / "context"
-    build_context(context, task, harness, refs)
+    build_context(context, task, harness, refs, library)
     for c in candidates:
-        folder = context / "candidates" / c.label
-        write_harness(c.harness, folder / "harness")
-        (folder / "diff.patch").write_text(diff(harness, c.harness), encoding="utf-8")
-        fell_back = f"This candidate fell back to the current harness: {c.fallback}\n\n" if c.fallback else ""
-        (folder / "notes.md").write_text(fell_back + (c.notes or "(no notes)"), encoding="utf-8")
-        write_rollout(probes[c.label], folder / "rollout")
-        for ref in refs:
-            (folder / f"contrast-{ref.label}.md").write_text(contrast(ref, probes[c.label]), encoding="utf-8")
+        write_candidate(context / "candidates" / c.label, harness, c, probes[c.label], refs)
     return edit_session(llm, "composer", system, harness, session, max_turns=max_turns, label=label)
 
 
 def contrastive_step(llm: LLM, sandbox: Sandbox, task: Task, harness: Harness, refs: Sequence[ExecutionRecord],
-                     folder: Path, *, k: int, prompts_dir: Path, limits: RolloutLimits, max_turns: int) -> StepRecord:
+                     folder: Path, *, k: int, library: Path, prompts_dir: Path, limits: RolloutLimits,
+                     max_turns: int) -> StepRecord:
     """Φ (Eq. 1), k wide (Eq. 2): from the reference runs of `harness`, propose
     k INV and k DOM candidates, probe each, compose k successors H′ (labels
-    composed1..k) from the whole pool, and run each. Every session and run is
-    kept under `folder`."""
+    composed1..k) from the whole pool, and run each. Editors and composers see
+    a copy of `library`, the improvement harness's library (Lesson 8). Every
+    session and run is kept under `folder`."""
     files = write_task(task, folder / "task")
     with ThreadPoolExecutor(len(SCOPES) * k) as pool:
         jobs = [pool.submit(propose, llm, editor_prompt(prompts_dir, scope, i, k), task, harness, refs,
-                            folder / "editors" / f"{scope}{i}", max_turns=max_turns, label=f"{scope}{i}")
+                            folder / "editors" / f"{scope}{i}", library=library, max_turns=max_turns,
+                            label=f"{scope}{i}")
                 for scope in SCOPES for i in range(1, k + 1)]
         candidates = tuple(job.result() for job in jobs)
     probes = probe(llm, sandbox, {c.label: c.harness for c in candidates}, task.prompt, files,
                    folder / "probes", limits)
     with ThreadPoolExecutor(k) as pool:
         jobs = [pool.submit(compose, llm, composer_prompt(prompts_dir, j, k), task, harness, refs, candidates,
-                            probes, folder / "composers" / f"composed{j}", max_turns=max_turns, label=f"composed{j}")
+                            probes, folder / "composers" / f"composed{j}", library=library, max_turns=max_turns,
+                            label=f"composed{j}")
                 for j in range(1, k + 1)]
         composed = tuple(job.result() for job in jobs)
     successors = probe(llm, sandbox, {c.label: c.harness for c in composed}, task.prompt, files,

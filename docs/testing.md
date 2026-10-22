@@ -2,7 +2,12 @@
 
 ## The tests
 
-`tests/` runs offline, with no API key: `docker compose run --rm app` runs it all.
+`tests/` runs offline, with no API key, but it needs Docker: some tests start real sandbox containers.
+
+```bash
+docker compose run --rm app                                                   # every test
+docker compose run --rm app uv run --frozen pytest tests/test_s01_harness.py  # one file
+```
 
 - **The real SDK, a scripted server.** Tests use the real Anthropic SDK client pointed at a scripted HTTP transport ([tests/scripted_api.py](../tests/scripted_api.py)). Our requests are serialised by the SDK and the canned replies are parsed into real SDK types, so a misspelt parameter or a response shape we handle wrongly fails here, not on the first live run.
 - **Answers by who is asking.** Sessions that run side by side don't call in a fixed order, so whole-pipeline tests answer each request by the session that sent it, recognised by its system prompt ([tests/routes.py](../tests/routes.py)).

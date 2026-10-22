@@ -1,6 +1,8 @@
 # Lessons
 
-Read the lessons in order. Each `steps/sNN_*.py` opens with the paper sections it implements and the design choices behind it; its runnable demo is `demos/dNN_*.py`. Run demos as `docker compose run --rm app uv run --frozen python -m demos.<name>` (see [running.md](running.md)); costs are rough, from our own runs.
+Read the lessons in order. Each `steps/sNN_*.py` opens with the paper sections it implements and the design choices behind it; its runnable demo is `demos/dNN_*.py`. Run a demo as `docker compose run --rm app uv run --frozen python -m demos.<name>` (see [running.md](running.md)). Costs are rough, from our own runs.
+
+Each section below names the module and the paper sections it covers, says what the lesson adds, and ends with the demo to try. Symbols such as H₀, H′, H★, Φ and ξ are the paper's; [design.md](design.md#where-the-papers-symbols-live) maps each one to the code.
 
 ## L0: the model gateway
 
@@ -14,7 +16,7 @@ Try: `demos.d00_llm` (no API calls), then `--live`.
 
 [steps/s01_harness.py](../steps/s01_harness.py) · paper: §2.1, Table 5, §D.1 to D.2, Prompt 1's rules
 
-The harness as an immutable value: eight components on an editable surface, the stock harness in [base_harness/](../base_harness/), `validate` (the rules that discard a tree before any run), `diff`, and loading and writing.
+The harness as an immutable value: a tree of files, each belonging to one of eight components. The lesson also adds the stock harness in [base_harness/](../base_harness/), `validate` (the rules that discard a tree before it is ever run), `diff`, and loading and writing.
 
 Try: `demos.d01_harness` (no API calls).
 
@@ -38,7 +40,7 @@ Try: `demos.d03_tasks` (no API calls), then `--live` (H₀ on the task, about 2 
 
 [steps/s04_propose.py](../steps/s04_propose.py), [prompts/](../prompts/) · paper: §2.2.1 Propose, §D.2 sessions, Prompts 1 and 2
 
-Two editors, INV (how the agent works) and DOM (what a practitioner knows), each get the evidence as files in `context/` and edit their own copy of the harness; the files they leave are the candidate. An invalid tree goes back once with the validator's message, then falls back to the tree it started from.
+Two editors, INV (how the agent works) and DOM (what a practitioner knows), each get the evidence as files in `context/` and edit their own copy of the harness; the files they leave are the candidate. An invalid tree goes back to its editor once, with the validator's message; if it is still invalid, the editor's starting tree is used instead.
 
 Try: `demos.d04_propose` (no API calls), then `--live` (H₀ once, then both editors: about $2.50, 5 to 30 minutes).
 
@@ -62,9 +64,9 @@ Try: `demos.d06_compose` (no API calls), then `--live` (one whole step: $2 to $4
 
 [steps/s07_recursion.py](../steps/s07_recursion.py) · paper: §2.2.2 Eq. 2, final selection, Prompt 5
 
-Parallel recursion: k runs of H, then the contrastive step k wide (k editors per lane, k composers over the whole pool, each composed harness run). For k > 1, a selector picks one output blind, by shuffled id; H★ is the harness that produced it.
+Parallel recursion: k runs of H, then the contrastive step k wide: k INV and k DOM editors, k composers that each see the whole pool of candidates, and one run of each composed harness. For k > 1, a selector picks one output blind, by shuffled id, from H's own runs and the composed harnesses' runs. H★ is the harness that produced it, which can be H itself.
 
-Try: `demos.d07_recursion` (no API calls), then `--live` (k = 2: $4 to $8, 15 to 60 minutes).
+Try: `demos.d07_recursion` (no API calls), then `--live` (k = 2: $4 to $8, 15 to 60 minutes); `--live --k 3` is wider, and dearer.
 
 ## L8: reflection and the library
 
@@ -72,12 +74,12 @@ Try: `demos.d07_recursion` (no API calls), then `--live` (k = 2: $4 to $8, 15 to
 
 A read-only reflector reads the whole improvement record (every candidate, the rejected ones too, every composer's decisions, every run, and what was submitted) and writes what each edit did, with a verdict, and at most one transferable lesson. The library keeps H★'s full tree and an `EXPERIENCE.md` per task, with an index; later tasks' editors and composers read a copy.
 
-Try: `demos.d08_library` (no API calls), then `--live` (k = 1 plus the reflector: $2 to $4).
+Try: `demos.d08_library` (no API calls), then `--live` (k = 1 plus the reflector: $2 to $4, 10 to 45 minutes), or `--live --k 2` to include selection ($4 to $8, 15 to 60 minutes).
 
 ## L9: the pipeline
 
 [steps/s09_pipeline.py](../steps/s09_pipeline.py) · paper: §2.1 the stream, Fig. 3, §2.3 reuse, Table 1
 
-The whole loop over a stream of tasks: for each task, recursion from H₀ with the library as it stands, then reflection, then the library update. Only the library carries from one task to the next. The demo then scores the stream Table 1-style, H₀'s base runs against the delivered output, for you only.
+The whole loop over a stream of tasks: for each task, recursion from H₀ with the library as it stands, then reflection, then the library update. Only the library carries from one task to the next. The demo then scores the stream as in the paper's Table 1: H₀'s base runs against the delivered output. The scores are for you only; no model in the pipeline sees them.
 
-Try: `demos.d09_pipeline` (no API calls), then `--live` (two tasks at k = 1: about $6, 30 to 60 minutes). With one run per harness, the table it prints shows the mechanism, not a measured gain: the same harness run twice can differ by more than an edit's effect.
+Try: `demos.d09_pipeline` (no API calls), then `--live` (two tasks at k = 1: about $6, 30 to 60 minutes), or `--live --k 2` for roughly twice that. With one run per harness, the table it prints shows the mechanism, not a measured gain: the same harness run twice can differ by more than an edit's effect.

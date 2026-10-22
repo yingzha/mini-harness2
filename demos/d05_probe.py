@@ -29,7 +29,7 @@ from steps.s05_probe import contrast, probe
 
 folder = config.WORKBUDDY_TASK
 if not folder.is_dir():
-    raise SystemExit(f"{folder.relative_to(config.ROOT)} not found: copy the task there first (see README).")
+    raise SystemExit(f"{folder.relative_to(config.ROOT)} not found: copy the task there first (see docs/running.md).")
 editors = Path(sys.argv[1]).resolve() / "editors" if sys.argv[1:] else max(config.RUNS_DIR.glob("demo_l4_*/editors"), default=None)
 if editors is None or not editors.is_dir():
     raise SystemExit("No Lesson 4 candidates found: run `python -m demos.d04_propose --live` first.")

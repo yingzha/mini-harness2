@@ -34,7 +34,7 @@ k = int(sys.argv[sys.argv.index("--k") + 1]) if "--k" in sys.argv else 2
 
 folder = config.WORKBUDDY_TASK
 if not folder.is_dir():
-    raise SystemExit(f"{folder.relative_to(config.ROOT)} not found: copy the task there first (see README).")
+    raise SystemExit(f"{folder.relative_to(config.ROOT)} not found: copy the task there first (see docs/running.md).")
 task = workbuddy.load_task(folder)
 stock, _ = load_harness(config.BASE_HARNESS_DIR)
 h0 = initial_harness(stock, workbuddy.REFERENCE)

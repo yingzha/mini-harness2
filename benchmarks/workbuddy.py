@@ -1,7 +1,7 @@
 """Real tasks from WorkBuddy-Bench Office (paper, Appendix B), one at a time, for smoke tests.
 
 The dataset isn't part of this repository: copy the task you use into
-data/wb-bench-office-v1.0/tasks/ (git-ignored; see README). Each task is a Harbor folder:
+data/wb-bench-office-v1.0/tasks/ (git-ignored; see docs/running.md). Each task is a Harbor folder:
 
     instruction.md                  the request
     environment/workspace.tar.gz    the files the agent starts with

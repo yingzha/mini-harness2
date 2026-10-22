@@ -22,7 +22,7 @@ Design
   Docker container per call that sees only the workspace, with no network, no
   secrets, an unprivileged user and process and memory caps, removed with
   everything it started when the call ends. Our own code, which holds the API
-  key, never runs model-written code (see README, "Safety").
+  key, never runs model-written code (see docs/safety.md).
 """
 
 from __future__ import annotations

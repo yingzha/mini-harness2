@@ -5,7 +5,7 @@ tasks, then a Table 1-style evaluation, for you only.
     python -m demos.d09_pipeline --live          # k = 1 ($3 to $5 and 10 to 45 minutes per task)
     python -m demos.d09_pipeline --live --k 2    # with selection, roughly twice that
 
-Needs the stream's tasks in data/ (see README). The evaluation needs no extra
+Needs the stream's tasks in data/ (see docs/running.md). The evaluation needs no extra
 runs: each task's base runs are H0's runs, so H0's score is theirs, and
 Harness²'s is the delivered output's. A live run is kept under
 runs/demo_l9_<time>/: library/ as it grew, <task>/ for each task's recursion
@@ -26,7 +26,7 @@ from steps.s09_pipeline import run_stream
 
 missing = [f.relative_to(config.ROOT) for f in config.WORKBUDDY_STREAM if not f.is_dir()]
 if missing:
-    raise SystemExit(f"Not found: {', '.join(map(str, missing))}. Copy the stream's tasks there first (see README).")
+    raise SystemExit(f"Not found: {', '.join(map(str, missing))}. Copy the stream's tasks there first (see docs/running.md).")
 tasks = [workbuddy.load_task(f) for f in config.WORKBUDDY_STREAM]
 folders = {t.id: f for t, f in zip(tasks, config.WORKBUDDY_STREAM)}
 print("The stream, in order. Each task starts from H0; only the library carries over:")

@@ -3,7 +3,7 @@
     python -m demos.d03_tasks          # the task, and its checks on an empty workspace (no API calls)
     python -m demos.d03_tasks --live   # also run the base harness H0 on it (Haiku, a few cents)
 
-Needs the task in data/ (see README). A live run is kept
+Needs the task in data/ (see docs/running.md). A live run is kept
 under runs/demo_l3_<time>/: the task as the agent got it, the workspace, the
 trajectory, and grade.md. grade.md holds expected values, so it is for you:
 nothing in the pipeline may ever hand it to a model.
@@ -30,7 +30,7 @@ def summary(g: Grade) -> str:
 
 folder = config.WORKBUDDY_TASK
 if not folder.is_dir():
-    raise SystemExit(f"{folder.relative_to(config.ROOT)} not found: copy the task there first (see README).")
+    raise SystemExit(f"{folder.relative_to(config.ROOT)} not found: copy the task there first (see docs/running.md).")
 task = workbuddy.load_task(folder)
 stock, _ = load_harness(config.BASE_HARNESS_DIR)
 h0 = initial_harness(stock, workbuddy.REFERENCE)

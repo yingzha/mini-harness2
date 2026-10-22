@@ -7,118 +7,52 @@ A from-scratch, lesson-by-lesson Python implementation of
 
 An agent is a frozen model plus a **harness**: the files around it (system prompt, guardrails, memory, tool guidance, subagents, skills, scripts and plugins). Harness² improves the harness on each new task, without an answer key. Two editors propose changes, one about how the agent works and one about what a practitioner in the field knows. Each candidate is run on the same task, and its behaviour is compared with the original run's. A composer keeps the edits the evidence supports (Propose, Probe, Compose). Across tasks, a reflector writes what was learned to a library that later tasks' editors read. Every task still starts from the same initial harness, H₀.
 
-## Models
+```
+for each task in the stream:
+  H₀ ──► run it ──► Propose (INV, DOM) ──► Probe (run each) ──► Compose ──► H′ ──► run it
+                        ▲ reads                    k > 1: pick one output blind ──► H★, delivered
+                        │                                                             │
+                     library ◄─────── Reflect on everything, add an entry ◄────────────┘
+```
 
-- **Executor:** Claude Haiku 5.5, at low effort, runs each task inside the harness. The paper pairs a weaker executor with a strong editor; at medium effort, Haiku passed 271 of our test task's 273 checks, leaving the editor little to improve.
-- **Editor:** Claude Opus 5.5 improves the harness: it proposes edits, composes them, selects outputs and reflects on what worked.
+Two models play the roles, as in the paper's weak-executor, strong-editor setup:
 
-## Running
+- **Executor:** Claude Haiku 5.5, at low effort, runs each task inside the harness. (At medium effort it passed 271 of our test task's 273 checks, leaving the editors little to improve.)
+- **Improver:** Claude Opus 5.5 proposes edits, composes them, selects outputs and reflects on what worked.
 
-Our code runs in one Docker container, `app`. The source is mounted **read-only**; only `runs/` and a scratch volume for temporary folders are writable. Code the model writes runs in separate, short-lived containers (see Safety).
+## Quick start
 
 ```bash
 cp .env.example .env          # then set ANTHROPIC_API_KEY in .env
 docker compose build          # also the image the sandboxes run
-docker compose run --rm app                                          # test suite (no API calls)
-docker compose run --rm app uv run --frozen python -m demos.d00_llm  # a lesson's demo
+docker compose run --rm app   # the test suite (no API calls)
+docker compose run --rm app uv run --frozen python -m demos.d01_harness   # a lesson's demo
 ```
 
-Live runs from Lesson 4 on can take half an hour. On a Mac, put `caffeinate -is` in front of the command, or the machine may sleep and drop the API connection mid-run.
+The demos from Lesson 3 on need real tasks from WorkBuddy-Bench Office copied into `data/`, and the live ones cost money: see [docs/running.md](docs/running.md).
 
-If your API key isn't scoped to a workspace, also set `ANTHROPIC_WORKSPACE_ID` in `.env`. On a Linux host, change `group_add` in [compose.yaml](compose.yaml) to the group id of `/var/run/docker.sock`.
+## Lessons
 
-From Lesson 3 on, the demos run one real task from WorkBuddy-Bench Office (`wb-bench-office-v1.0`), which is not part of this repository. Copy that task into `data/`; it is git-ignored, since it holds the task's gold answers:
+Read them in order. Each `steps/sNN_*.py` opens with the paper sections it implements; its demo is `demos/dNN_*.py`. [docs/lessons.md](docs/lessons.md) has the details and what each demo costs.
 
-```bash
-mkdir -p data/wb-bench-office-v1.0/tasks
-cp -R ~/Downloads/wb-bench-office-v1.0/tasks/service-channel-ticket-daily data/wb-bench-office-v1.0/tasks/
-```
+| Lesson | Module | Adds |
+|---|---|---|
+| L0 | [s00_llm](steps/s00_llm.py) | The model gateway, by role, with a usage and cost meter |
+| L1 | [s01_harness](steps/s01_harness.py) | The harness as a value: eight components, validation, diffs |
+| L2 | [s02_executor](steps/s02_executor.py) | The agent loop, its tools and plugins, the execution record, the sandbox |
+| L3 | [s03_tasks](steps/s03_tasks.py) | Tasks, H₀, and a real task's own checks (which the method never sees) |
+| L4 | [s04_propose](steps/s04_propose.py) | Propose: INV and DOM editors, each editing its own copy of the harness |
+| L5 | [s05_probe](steps/s05_probe.py) | Probe: each candidate run once, and its run contrasted with the reference |
+| L6 | [s06_compose](steps/s06_compose.py) | Compose, and the whole contrastive step Φ |
+| L7 | [s07_recursion](steps/s07_recursion.py) | Parallel recursion, and the blind selection of H★ |
+| L8 | [s08_library](steps/s08_library.py) | Reflection, and the library later tasks read |
+| L9 | [s09_pipeline](steps/s09_pipeline.py) | The whole loop over a stream of tasks, and its evaluation |
 
-## Safety
+## Docs
 
-From Lesson 2 on, the model writes code that we run: `run_python` calls (from the agent and its subagents) and plugin hooks. Each call runs in a fresh container (`Sandbox` in [steps/s02_executor.py](steps/s02_executor.py)) that:
-
-- sees only that rollout's workspace (read-only for plugins): not the source (so not the grader), not other rollouts;
-- has no network, and none of our environment, so no API key;
-- runs as an unprivileged user with every capability dropped and no way to gain more;
-- is capped at 128 processes and 512 MB of memory;
-- has its output cut to the start and end as it streams in, on our side, so printing gigabytes costs our container nothing;
-- is removed when the call ends, which kills anything it left running.
-
-[tests/test_s02_executor.py](tests/test_s02_executor.py) checks each of these from inside a sandbox, and `tests/mutations/` proves each check fails when its protection is removed.
-
-A benchmark task's own checks are downloaded code, so they run in a sandbox too, with the task's tests and gold answers mounted read-only. The workspace being graded is mounted at `/work`, not `/workspace`: their test module puts `/workspace` first on Python's import path, so an `eval_core.py` an agent wrote there would replace the real checks.
-
-What remains:
-
-- The `app` container holds the API key and the Docker socket, and whoever can use that socket controls Docker. That is acceptable only because no model-written code runs in `app`; keep it that way. File tools run there, but they only read and write files, refusing paths outside their folder.
-- Containers share the kernel of Docker's VM, so a kernel exploit could escape one. A VM per call (gVisor, Firecracker) would be stronger; this project doesn't need it.
-- Use a workspace-scoped API key with a spend limit.
-
-If a run is killed mid-call, its sandbox may survive. `docker rm -f $(docker ps -aq --filter label=mini-harness2-sandbox)` removes every sandbox.
-
-## Code layout
-
-- `steps/sNN_*.py`: one lesson each. Pure library code with no globals, no CLI and no side effects on import. Dependencies (such as the `LLM` gateway) are passed in explicitly.
-- `base_harness/`: H₀'s stock files, the harness every task starts from.
-- `prompts/`: the improver's prompts (Appendix H), adapted to this runtime: [editor.md](prompts/editor.md) with a dimension section ([editor_inv.md](prompts/editor_inv.md), [editor_dom.md](prompts/editor_dom.md)), [composer.md](prompts/composer.md), and [harness_rules.md](prompts/harness_rules.md), the sections both share.
-- `benchmarks/`: real tasks to run the method on, and the benchmark's own way of grading them. [benchmarks/workbuddy.py](benchmarks/workbuddy.py) loads a WorkBuddy-Bench task and runs its checks. Nothing in `steps/` imports from here; entry points pick a task and pass it in.
-- `data/`: datasets you download (git-ignored; see Running).
-- `runs/`: what demos and runs leave behind: workspaces, trajectories, grades (git-ignored).
-- `demos/dNN_*.py`: the runnable entry point for each lesson. The only place that reads `config.py` and builds real clients.
-- `config.py`: immutable default settings (frozen dataclasses), with no behaviour.
-- `tests/`: offline tests. They run the real Anthropic SDK against a scripted HTTP transport ([tests/scripted_api.py](tests/scripted_api.py)), and each test's docstring names the bug it guards against.
-- `tests/mutations/`: for each module, the bugs its tests must catch, and which test catches each one.
-- `tools/mutate.py` (`python -m tools.mutate`): plants those bugs one at a time in a copy of the project and checks the right test fails.
-
-## Do the tests actually catch bugs?
-
-Passing tests prove little on their own. `tools/mutate.py` plants each bug listed in `tests/mutations/` into a temporary copy of the project and checks that the test named for it fails. It also runs *controls*: changes that alter nothing, which no test may fail on. The real files are never touched.
-
-```bash
-docker compose run --rm app uv run --frozen python -m tools.mutate                                  # every list, about 10 minutes
-docker compose run --rm app uv run --frozen python -m tools.mutate tests/mutations/s01_harness.py   # one module
-```
-
-When you add a test, add the bug it guards against to the matching list.
-
-## Learning path
-
-Read the lessons in order. Each `steps/sNN_*.py` opens with the paper section it implements; its demo is `demos/dNN_*.py`.
-
-| Lesson | Module | Paper | What it adds | Try |
-|---|---|---|---|---|
-| L0 | [steps/s00_llm.py](steps/s00_llm.py) | §2.1 frozen M, §3.1 roles, Fig. 6 compute | The `LLM` gateway: `llm.call(role, …)`; executor vs editor models; a per-run usage and cost meter | `python -m demos.d00_llm` (offline), then `--live` |
-| L1 | [steps/s01_harness.py](steps/s01_harness.py) | §2.1, Table 5, §D.1-D.2, Prompt 1 rules | The harness as an immutable value: 8 components on an editable surface, H₀ in [base_harness/](base_harness/), `validate`, `diff`, load/write | `python -m demos.d01_harness` |
-| L2 | [steps/s02_executor.py](steps/s02_executor.py) | §2.1 A(q; M, H), §2.2.1 e = (τ, y), Table 5 activation, Table 7 | The agent loop, file and `run_python` tools, `load_skill`, `run_subagent`, plugin hooks, the execution record, and the sandbox that model-written code runs in | `python -m demos.d02_executor` (live, about $0.01) |
-| L3 | [steps/s03_tasks.py](steps/s03_tasks.py), [benchmarks/workbuddy.py](benchmarks/workbuddy.py) | §2.1 the task stream, §D.1 H₀, Appendix B grading | A task is a request plus files; H₀ is the stock harness plus the benchmark's reference instructions; the deliverable is whatever the agent created or changed; a real task's own checks give the score (the fraction that pass), which the method itself never sees | `python -m demos.d03_tasks` (no API calls), then `--live` (H₀ on the task, about 2 cents) |
-| L4 | [steps/s04_propose.py](steps/s04_propose.py), [prompts/](prompts/) | §2.2.1 Propose, §D.2 sessions, Prompts 1-2 | Two editors (INV: how the agent works; DOM: what a practitioner knows) each get the evidence as files in `context/` and edit their own copy of the harness; the files they leave are the candidate. An invalid tree goes back once with the validator's message, then falls back to the starting tree | `python -m demos.d04_propose` (no API calls), then `--live` (H₀ once, then both editors: Opus, about $2.50 and 5 to 30 minutes) |
-| L5 | [steps/s05_probe.py](steps/s05_probe.py) | §2.2.1 Probe | Each candidate runs once on the same task, side by side, under matched conditions (same model, files, limits; only the harness differs). A contrast lays a probe's run beside the reference's: run stats, which harness components it actually used, and a diff of the deliverables. Facts, never a verdict | `python -m demos.d05_probe` (reuses L4's candidates; H₀ and both candidates, a few cents) |
-| L6 | [steps/s06_compose.py](steps/s06_compose.py) | §2.2.1 Compose, Eq. 1, Prompt 3 | The composer reads the reference runs and every candidate (its tree, diff, editor's notes, probe run and contrasts) and edits a copy of the current harness into the successor H′, citing a trajectory moment for each decision. `contrastive_step` is Φ: propose INV and DOM, probe both, compose, run H′; its record is ξ | `python -m demos.d06_compose` (no API calls), then `--live` (one whole step: $2 to $4, 10 to 45 minutes) |
-| L7 | [steps/s07_recursion.py](steps/s07_recursion.py) | §2.2.2 Eq. 2, final selection, Prompt 5 | Parallel recursion: k runs of H, then the contrastive step k wide (k editors per lane, k composers over the whole pool, each composed harness run). For k > 1 a selector picks one output blind, by shuffled id; H★ is the harness that produced it | `python -m demos.d07_recursion` (no API calls), then `--live` (k = 2: $4 to $8, 15 to 60 minutes) |
-| L8 | [steps/s08_library.py](steps/s08_library.py) | §2.3 Eq. 4, §D.2 library, Prompt 6 | A read-only reflector reads the whole improvement record (every candidate, rejected ones too, every composer's decisions, every run, what was submitted) and writes what each edit did, with a verdict, and at most one transferable lesson. The library keeps H★'s full tree and an EXPERIENCE.md per task, with an index; later tasks' editors and composers read a copy | `python -m demos.d08_library` (no API calls), then `--live` (k = 1 plus the reflector: $2 to $4) |
-| L9 | s09_pipeline, evaluate.py | the full loop, Table 1 | | |
-
-## Deviations from the paper
-
-Each one follows from the same question: does the rule guard a failure that can happen in *this* runtime?
-
-- **Plugins are Python** (`plugin/<name>.py`), not TypeScript, because our executor is a Python loop.
-- **No "template braces" rule.** The paper forbids `{{` / `{%` in always-on text because its runtime renders those files with Jinja. Ours doesn't template, so there is nothing to break.
-- **No frontmatter `name` / `mode: subagent`.** OpenCode needs them to load agents; our runtime identifies skills and subagents by their folder. Only `description` is required, because the agent reads it to decide what to use.
-- **Skill helper scripts must be `.py`**, since `run_python` is the only way our executor runs code.
-- **A small custom agent instead of OpenCode/Codex.** Tools: `list_files`, `read_file`, `write_file`, `run_python` (no shell), plus `load_skill` and `run_subagent` when the harness has skills or subagents. A rollout is capped at 40 turns (the paper: 200) and each code run at 60 s; there is no separate wall-clock cap, since those two already bound it.
-- **Two plugin hooks:** `after_tool` (append a note to a tool result) and `before_finish` (keep the agent working, at most twice). Subagents can't delegate again and don't run plugins.
-- **One real task instead of three benchmarks.** We test with WorkBuddy-Bench Office's `service-channel-ticket-daily` (a daily ticket report from a CSV export, a JSON snapshot and a guidance document); the paper runs every test task of WorkBuddy-Bench, JobBench and LAB, three times each.
-- **Deterministic checks only.** The task's score is the fraction of its own 273 checks that pass. Its LLM-judge rubrics (20% of the benchmark's full score for this task) are not run.
-
-- **The improver's prompts are adapted to this runtime**, rule for rule: Python plugins with our two hooks, scripts run with `run_python`, the two validation rules that apply here, and no benchmark-specific block (H₀'s reference instructions are already in the harness the editor reads). Plugin shapes our hooks can't do (trimming or capping a tool's output) are left out. The composer's prompt adds one sentence, which our contrast makes checkable: a component the rollout never used cannot have caused what it did.
-- **Editors and the composer have a `copy_file` tool.** The paper's sessions run in a coding agent with a shell; ours has only file tools, and retyping a 15 KB script to merge it would cost tokens and risk typos.
-- **One library per stream run, in its run folder.** The paper keeps one library per benchmark domain and starts it empty for each stream. A task that adopted H₀ itself and supported no lesson adds no entry.
-- **Parallel recursion only.** The paper's main tables use the single step and parallel recursion; sequential recursion (Eq. 3, Prompt 4) appears in one scaling figure. It is not built here: it would chain k one-wide steps, each also given every earlier round's evidence.
-- **The selection pool is H's own runs plus each composed harness's run.** The paper says the selector sees "anonymized deliverables", some from the unmodified harness, without listing the pool. If the selector's reply names no valid id after one retry, the first run of H is taken and the fallback recorded.
-- **No folder guard for grades.** The paper refuses any session folder holding a verdict, rubric or score. Here an editor's folder is built only from a task, a harness and execution records, none of which can hold one.
-- **Editor sessions are capped at 60 turns** (the paper sets no cap); a session that hits the cap falls back to its starting tree, like an invalid one.
-- **The library is empty until Lesson 8**, so editors see an empty `context/library/`, as on the first task of a stream.
-
-Filled in further as lessons land.
+- [docs/lessons.md](docs/lessons.md): each lesson in more detail, with its demo.
+- [docs/running.md](docs/running.md): setup, the tasks, costs, long runs, where results go, cleanup.
+- [docs/design.md](docs/design.md): code layout, the rules the code follows, and where each of the paper's symbols lives.
+- [docs/safety.md](docs/safety.md): the sandbox model-written code runs in, and why no grade reaches the method.
+- [docs/testing.md](docs/testing.md): offline tests against a scripted API, and mutation testing.
+- [docs/deviations.md](docs/deviations.md): where and why this differs from the paper.

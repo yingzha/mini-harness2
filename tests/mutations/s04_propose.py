@@ -25,7 +25,7 @@ MUTATIONS = [
     {
         "label": "an invalid tree is never sent back",
         "file": "steps/s04_propose.py",
-        "replace": [("if self._sent_back or not problems:", "if True:")],
+        "replace": [("    if not problems:\n        return None", "    if True:\n        return None")],
         "expect": "test_an_invalid_tree_goes_back_to_its_editor_once",
     },
     {

@@ -50,4 +50,10 @@ MUTATIONS = [
         ],
         "expect": "test_offline_demo_runs[d06_compose]",
     },
+    {
+        "label": "d07 fills the selector prompt with a wrong argument",
+        "file": "demos/d07_recursion.py",
+        "replace": [("print(selector_prompt(config.PROMPTS_DIR, 4))", "print(selector_prompt(config.PROMPTS_DIR))")],
+        "expect": "test_offline_demo_runs[d07_recursion]",
+    },
 ]

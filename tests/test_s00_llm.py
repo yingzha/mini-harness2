@@ -99,3 +99,12 @@ def test_blank_workspace_id_sends_no_header():
         api = ScriptedAPI([reply(text("ok"), model=EXECUTOR)])
         LLM(api.client(default_headers=workspace_headers(environ)), SETTINGS).call("executor", "sys", USER)
         assert api.requests[0].headers.get("anthropic-workspace-id") == expected
+
+
+def test_the_real_client_retries_as_configured(monkeypatch):
+    """Guards: one transient API error (a dropped connection, an overload)
+    ending an hour-long run, because the client gave up after the SDK's
+    default two retries instead of the configured number."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")   # never sent: no request is made
+    settings = replace(config.LLM_SETTINGS, max_retries=7)
+    assert LLM.from_env(settings).client.max_retries == 7

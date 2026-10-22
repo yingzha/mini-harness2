@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import anthropic
 import httpx2
@@ -23,14 +23,19 @@ class SentRequest:
 
 
 class ScriptedAPI:
-    """Answers each POST /v1/messages with the next queued reply and records the request."""
+    """Answers each POST /v1/messages with the next queued reply, or with
+    `replies(body)` when given a function (for sessions that run side by side,
+    whose order is not fixed), and records the request."""
 
-    def __init__(self, replies: list[dict]) -> None:
-        self._replies = list(replies)
+    def __init__(self, replies: list[dict] | Callable[[dict], dict]) -> None:
+        self._replies = replies if callable(replies) else list(replies)
         self.requests: list[SentRequest] = []
 
     def _handle(self, request: httpx2.Request) -> httpx2.Response:
-        self.requests.append(SentRequest(dict(request.headers), json.loads(request.content)))
+        body = json.loads(request.content)
+        self.requests.append(SentRequest(dict(request.headers), body))
+        if callable(self._replies):
+            return httpx2.Response(200, json=self._replies(body))
         if not self._replies:
             raise AssertionError("ScriptedAPI ran out of replies")
         return httpx2.Response(200, json=self._replies.pop(0))

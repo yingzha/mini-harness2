@@ -42,6 +42,7 @@ class LLMSettings:
     server_fallback_models: frozenset[str]  # models that accept fallbacks="default"
     server_fallback_beta: str
     max_tokens_per_turn: int
+    max_retries: int   # per request, for transient API errors (the SDK backs off between tries)
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,9 @@ LLM_SETTINGS = LLMSettings(
     server_fallback_beta="server-side-fallback-2026-07-01",
     # Non-streaming per-turn cap; keeps each request under the SDK's HTTP timeout.
     max_tokens_per_turn=16000,
+    # A run makes dozens of calls over up to an hour, and one call that fails for
+    # good ends it. The SDK's default of 2 retries proved too few on a live run.
+    max_retries=6,
 )
 
 # ---------------------------------------------------------------------------

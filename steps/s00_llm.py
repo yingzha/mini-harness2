@@ -179,8 +179,9 @@ class LLM:
 
     @classmethod
     def from_env(cls, settings: LLMSettings) -> LLM:
-        """Real client. The SDK resolves credentials itself (ANTHROPIC_API_KEY, ...)."""
-        client = anthropic.Anthropic(default_headers=workspace_headers(os.environ))
+        """Real client. The SDK resolves credentials itself (ANTHROPIC_API_KEY, ...)
+        and retries transient errors (connection, rate limit, overload) with backoff."""
+        client = anthropic.Anthropic(default_headers=workspace_headers(os.environ), max_retries=settings.max_retries)
         return cls(client, settings)
 
     def call(self, role: str, system: str, messages: list, tools: list | None = None) -> BetaMessage:

@@ -122,4 +122,10 @@ MUTATIONS = [
         ],
         "expect": None,
     },
+    {
+        "label": "the real client ignores the configured retries",
+        "file": "steps/s00_llm.py",
+        "replace": [(", max_retries=settings.max_retries)", ")")],
+        "expect": "test_the_real_client_retries_as_configured",
+    },
 ]

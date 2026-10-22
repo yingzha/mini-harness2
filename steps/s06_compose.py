@@ -12,6 +12,8 @@ Paper anchors
   in ξ."
 * Eq. 1: (H′, e′, ξ) = Φ(q_t, H, E; R_t). One contrastive step returns the
   successor harness, its execution record and the step record ξ.
+* Eq. 2 (Lesson 7) widens the same step: k candidates per scope, and k
+  composers that each receive the whole pool. At k = 1 it is Eq. 1.
 * Prompt 3: the composer's mission (prompts/composer.md), which shares
   Prompt 1's last four sections (prompts/harness_rules.md).
 
@@ -20,9 +22,9 @@ Design
 * The composer runs the same editing session as the editors (`edit_session`)
   on more evidence: every candidate's tree, diff, notes, run and contrasts.
   Its copy starts as the current harness, so KEEP_BASE means leaving it alone.
-* `contrastive_step` is Φ: propose INV and DOM side by side, probe both,
-  compose, run the successor. The reference runs (E) are passed in, so the
-  caller decides how many there are and can reuse them.
+* `contrastive_step` is Φ, k wide: propose k INV and k DOM candidates side by
+  side, probe them all, compose k successors, run each. The reference runs
+  (E) are passed in, so the caller decides how many there are.
 * ξ is a value, `StepRecord`. Every session and run also stays on disk under
   the step's folder, for people (and, from Lesson 8, the reflector) to read.
 """
@@ -37,7 +39,7 @@ from typing import Mapping, Sequence
 from config import RolloutLimits
 from steps.s00_llm import LLM
 from steps.s01_harness import Harness, diff, write_harness
-from steps.s02_executor import ExecutionRecord, Sandbox, execute
+from steps.s02_executor import ExecutionRecord, Sandbox
 from steps.s03_tasks import Task, write_task
 from steps.s04_propose import SCOPES, Candidate, build_context, edit_session, editor_prompt, propose, write_rollout
 from steps.s05_probe import contrast, probe
@@ -46,11 +48,11 @@ from steps.s05_probe import contrast, probe
 @dataclass(frozen=True)
 class StepRecord:
     """ξ (Eq. 1): what one contrastive step saw, decided and produced."""
-    refs: tuple[ExecutionRecord, ...]        # runs of the current harness H
-    candidates: tuple[Candidate, ...]        # the INV and DOM proposals
-    probes: Mapping[str, ExecutionRecord]    # each candidate's run, by its label
-    composed: Candidate                      # H′ (composed.harness) and the composer's decisions
-    successor: ExecutionRecord               # e′: H′'s run
+    refs: tuple[ExecutionRecord, ...]           # runs of the current harness H
+    candidates: tuple[Candidate, ...]           # the INV and DOM proposals
+    probes: Mapping[str, ExecutionRecord]       # each candidate's run, by its label
+    composed: tuple[Candidate, ...]             # each H′ (.harness) with its composer's decisions
+    successors: Mapping[str, ExecutionRecord]   # each e′: its H′'s run, by the same label
 
 
 def composer_prompt(prompts_dir: Path, j: int, k: int) -> str:
@@ -62,7 +64,7 @@ def composer_prompt(prompts_dir: Path, j: int, k: int) -> str:
 
 def compose(llm: LLM, system: str, task: Task, harness: Harness, refs: Sequence[ExecutionRecord],
             candidates: Sequence[Candidate], probes: Mapping[str, ExecutionRecord], session: Path, *,
-            max_turns: int) -> Candidate:
+            max_turns: int, label: str) -> Candidate:
     """One composer session (system: from composer_prompt) in the folder
     `session`. Its evidence is the editors' plus, for each candidate:
 
@@ -83,24 +85,28 @@ def compose(llm: LLM, system: str, task: Task, harness: Harness, refs: Sequence[
         write_rollout(probes[c.label], folder / "rollout")
         for ref in refs:
             (folder / f"contrast-{ref.label}.md").write_text(contrast(ref, probes[c.label]), encoding="utf-8")
-    return edit_session(llm, "composer", system, harness, session, max_turns=max_turns, label="composed")
+    return edit_session(llm, "composer", system, harness, session, max_turns=max_turns, label=label)
 
 
 def contrastive_step(llm: LLM, sandbox: Sandbox, task: Task, harness: Harness, refs: Sequence[ExecutionRecord],
-                     folder: Path, *, prompts_dir: Path, limits: RolloutLimits, max_turns: int) -> StepRecord:
-    """Φ (Eq. 1): from the reference runs of `harness`, propose INV and DOM
-    candidates, probe each, compose the successor H′, and run it. Every
-    session and run is kept under `folder`."""
+                     folder: Path, *, k: int, prompts_dir: Path, limits: RolloutLimits, max_turns: int) -> StepRecord:
+    """Φ (Eq. 1), k wide (Eq. 2): from the reference runs of `harness`, propose
+    k INV and k DOM candidates, probe each, compose k successors H′ (labels
+    composed1..k) from the whole pool, and run each. Every session and run is
+    kept under `folder`."""
     files = write_task(task, folder / "task")
-    with ThreadPoolExecutor(len(SCOPES)) as pool:
-        jobs = [pool.submit(propose, llm, editor_prompt(prompts_dir, scope, 1, 1), task, harness, refs,
-                            folder / "editors" / f"{scope}1", max_turns=max_turns, label=f"{scope}1")
-                for scope in SCOPES]
+    with ThreadPoolExecutor(len(SCOPES) * k) as pool:
+        jobs = [pool.submit(propose, llm, editor_prompt(prompts_dir, scope, i, k), task, harness, refs,
+                            folder / "editors" / f"{scope}{i}", max_turns=max_turns, label=f"{scope}{i}")
+                for scope in SCOPES for i in range(1, k + 1)]
         candidates = tuple(job.result() for job in jobs)
     probes = probe(llm, sandbox, {c.label: c.harness for c in candidates}, task.prompt, files,
                    folder / "probes", limits)
-    composed = compose(llm, composer_prompt(prompts_dir, 1, 1), task, harness, refs, candidates, probes,
-                       folder / "composer", max_turns=max_turns)
-    successor = execute(llm, sandbox, composed.harness, task.prompt, files, folder / "successor", limits,
-                        label="successor")
-    return StepRecord(tuple(refs), candidates, probes, composed, successor)
+    with ThreadPoolExecutor(k) as pool:
+        jobs = [pool.submit(compose, llm, composer_prompt(prompts_dir, j, k), task, harness, refs, candidates,
+                            probes, folder / "composers" / f"composed{j}", max_turns=max_turns, label=f"composed{j}")
+                for j in range(1, k + 1)]
+        composed = tuple(job.result() for job in jobs)
+    successors = probe(llm, sandbox, {c.label: c.harness for c in composed}, task.prompt, files,
+                       folder / "successors", limits)
+    return StepRecord(tuple(refs), candidates, probes, composed, successors)

@@ -31,7 +31,7 @@ MUTATIONS = [
     {
         "label": "the successor run uses the current harness, not H′",
         "file": "steps/s06_compose.py",
-        "replace": [("successor = execute(llm, sandbox, composed.harness,", "successor = execute(llm, sandbox, harness,")],
+        "replace": [("probe(llm, sandbox, {c.label: c.harness for c in composed}", "probe(llm, sandbox, {c.label: harness for c in composed}")],
         "expect": "test_a_contrastive_step_runs_the_harness_it_composed",
     },
     {
@@ -51,5 +51,17 @@ MUTATIONS = [
         "file": "steps/s06_compose.py",
         "replace": [('write_text(fell_back + (c.notes or "(no notes)")', 'write_text(fell_back + "(no notes)"')],
         "expect": "test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly",
+    },
+    {
+        "label": "every editor is told it is candidate 1 of 1",
+        "file": "steps/s06_compose.py",
+        "replace": [("editor_prompt(prompts_dir, scope, i, k)", "editor_prompt(prompts_dir, scope, 1, 1)")],
+        "expect": "test_parallel_recursion_adopts_the_harness_whose_output_is_delivered",
+    },
+    {
+        "label": "every composer is told it is composer 1",
+        "file": "steps/s06_compose.py",
+        "replace": [("composer_prompt(prompts_dir, j, k)", "composer_prompt(prompts_dir, 1, k)")],
+        "expect": "test_parallel_recursion_adopts_the_harness_whose_output_is_delivered",
     },
 ]

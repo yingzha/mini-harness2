@@ -49,7 +49,8 @@ def test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly(tmp_p
         reply(text("<notes>kept -> inv1 guardrails.md -> h0 never reopened its report</notes>"), model=EDITOR)])
     llm = LLM(api.client(), config.LLM_SETTINGS)
     probes = {"inv1": record("inv1", INV.harness, {"report.md": "total 6\n"}), "dom1": record("dom1", H0, {})}
-    composed = compose(llm, "mission", TASK, H0, [REF], [INV, DOM], probes, tmp_path, max_turns=3)
+    composed = compose(llm, "mission", TASK, H0, [REF], [INV, DOM], probes, tmp_path, max_turns=3,
+                       label="composed1")
 
     candidates = tmp_path / "context" / "candidates"
     assert (candidates / "inv1" / "diff.patch").read_text() == diff(H0, INV.harness)
@@ -76,11 +77,12 @@ def test_a_contrastive_step_runs_the_harness_it_composed(sandbox, tmp_path):
         reply(text("<notes>revised -> guardrails.md -> h0 never reopened its report</notes>"), model=EDITOR),
         ran])         # the successor
     xi = contrastive_step(LLM(api.client(), config.LLM_SETTINGS), sandbox, TASK, H0, [REF], tmp_path,
-                          prompts_dir=config.PROMPTS_DIR, limits=LIMITS, max_turns=3)
+                          k=1, prompts_dir=config.PROMPTS_DIR, limits=LIMITS, max_turns=3)
 
     assert set(xi.probes) == {c.label for c in xi.candidates} == {"inv1", "dom1"}
-    assert xi.composed.harness.files["guardrails.md"] == RULE
-    assert xi.successor.harness == xi.composed.harness and RULE.strip() in api.requests[-1].body["system"]
+    [composed] = xi.composed
+    assert composed.harness.files["guardrails.md"] == RULE
+    assert xi.successors[composed.label].harness == composed.harness and RULE.strip() in api.requests[-1].body["system"]
 
 
 def test_the_composer_is_bound_by_the_editors_rules():

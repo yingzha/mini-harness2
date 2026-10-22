@@ -25,9 +25,9 @@ Design
   `edit_session`, on more evidence.
 * The files are the proposal: whatever is in context/harness/ when the session
   ends is loaded back as the candidate. The editor's reply is only its notes.
-* Validation is a before_finish hook: when the editor says it's done, an
-  invalid tree goes back to it with the validator's message, in the same
-  session, once.
+* Validation is a before_finish hook (`SendBackOnce`): when the editor says
+  it's done, an invalid tree goes back to it with the validator's message, in
+  the same session, once.
 * No grade can reach an editor. The paper guards the folder; here the context
   is built only from a Task, a Harness and ExecutionRecords, and none of them
   can hold one.
@@ -39,7 +39,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from steps.s00_llm import LLM
 from steps.s01_harness import Harness, load_harness, validate, write_harness
@@ -128,26 +128,32 @@ def editor_tools(session: Path, harness_dir: Path) -> list[Tool]:
                  {"type": "object", "properties": {"path": path}, "required": ["path"]}, delete_file)]
 
 
-class _ValidateOnFinish:
-    """When the editor says it's done, send an invalid tree back with the
-    validator's message, once (§D.2)."""
+class SendBackOnce:
+    """Hooks for a session whose result must be usable: when it says it's done,
+    `problem` looks at its final reply and returns what is wrong, or None. A
+    problem goes back to the session as a message, once (§D.2's retry)."""
 
-    def __init__(self, harness_dir: Path) -> None:
-        self._harness_dir = harness_dir
+    def __init__(self, problem: Callable[[str], str | None]) -> None:
+        self._problem = problem
         self._sent_back = False
 
     def after_tool(self, event: dict[str, Any]) -> HookResult:
         return HookResult()
 
     def before_finish(self, event: dict[str, Any]) -> HookResult:
-        problems = validate(load_harness(self._harness_dir)[0])
-        if self._sent_back or not problems:
+        if self._sent_back or (message := self._problem(event["final_text"])) is None:
             return HookResult()
         self._sent_back = True
-        return HookResult((
-            "Validation failed, so this harness would be discarded:\n"
-            + "".join(f"- {p}\n" for p in problems)
-            + "Fix it in context/harness/, then reply with your <notes> block again.",))
+        return HookResult((message,))
+
+
+def _invalid(harness_dir: Path) -> str | None:
+    """The validator's message for the tree in harness_dir, or None if it is valid."""
+    problems = validate(load_harness(harness_dir)[0])
+    if not problems:
+        return None
+    return ("Validation failed, so this harness would be discarded:\n" + "".join(f"- {p}\n" for p in problems)
+            + "Fix it in context/harness/, then reply with your <notes> block again.")
 
 
 def propose(llm: LLM, system: str, task: Task, harness: Harness, refs: Sequence[ExecutionRecord],
@@ -165,7 +171,7 @@ def edit_session(llm: LLM, role: str, system: str, harness: Harness, session: Pa
     if that is invalid or the session didn't finish."""
     harness_dir = session / "context" / "harness"
     result = run_agent_loop(llm, role, system, _START, editor_tools(session, harness_dir),
-                            max_turns=max_turns, hooks=_ValidateOnFinish(harness_dir))
+                            max_turns=max_turns, hooks=SendBackOnce(lambda _: _invalid(harness_dir)))
     proposed, dropped = load_harness(harness_dir)
     notes = next((m[1].strip() for s in reversed(result.steps) if (m := _NOTES.search(s.text))), "")
     if result.stop_reason != "end_turn":   # a half-made edit is not a proposal

@@ -8,8 +8,8 @@ the composer writes the successor H′, and H′ runs.
 A live run is kept under runs/demo_l6_<time>/:
   h0/                       the reference run
   step/editors/<label>/     each editor's session; step/probes/<label>/ its candidate's run
-  step/composer/context/    exactly what the composer saw, with harness/ as it left it: H′
-  step/successor/           H′'s run (its workspace); successor.md its trajectory
+  step/composers/composed1/context/   what the composer saw, with harness/ as it left it: H′
+  step/successors/composed1/          H′'s run (its workspace); successor.md its trajectory
   composed.diff, composed.md   H′ against H0, and the composer's decisions
   grade.md                  every run's failed checks: for you only
 """
@@ -48,21 +48,23 @@ ref = execute(llm, sandbox, h0, task.prompt, write_task(task, run_dir / "task"),
               config.ROLLOUT_LIMITS, label="h0")
 print("Now the step: editors, probes, composer, successor (10 to 45 minutes; nothing prints until it ends)...",
       flush=True)
-xi = contrastive_step(llm, sandbox, task, h0, [ref], run_dir / "step", prompts_dir=config.PROMPTS_DIR,
+xi = contrastive_step(llm, sandbox, task, h0, [ref], run_dir / "step", k=1, prompts_dir=config.PROMPTS_DIR,
                       limits=config.ROLLOUT_LIMITS, max_turns=config.IMPROVER_MAX_TURNS)
 
 for c in xi.candidates:
     probe_table = contrast(ref, xi.probes[c.label]).split("\n## ")[0].strip()
     print(f"\n--- {c.label}: " + (f"FELL BACK to H0: {c.fallback}" if c.fallback else "proposed edits")
           + f"\n{probe_table}")
-(run_dir / "composed.diff").write_text(diff(h0, xi.composed.harness))
-(run_dir / "composed.md").write_text(xi.composed.notes)
-(run_dir / "successor.md").write_text(render_record(xi.successor))
-print("\n--- composer: " + (f"FELL BACK to H0: {xi.composed.fallback}" if xi.composed.fallback else "decisions")
-      + f"\n{xi.composed.notes}")
-print("\n" + contrast(ref, xi.successor).split("\n## ")[0].strip())
+[composed] = xi.composed
+successor = xi.successors[composed.label]
+(run_dir / "composed.diff").write_text(diff(h0, composed.harness))
+(run_dir / "composed.md").write_text(composed.notes)
+(run_dir / "successor.md").write_text(render_record(successor))
+print("\n--- composer: " + (f"FELL BACK to H0: {composed.fallback}" if composed.fallback else "decisions")
+      + f"\n{composed.notes}")
+print("\n" + contrast(ref, successor).split("\n## ")[0].strip())
 
-runs = {"h0": ref, **xi.probes, "successor": xi.successor}
+runs = {"h0": ref, **xi.probes, "successor": successor}
 grades = {label: workbuddy.grade(sandbox, folder, r.workspace) for label, r in runs.items()}
 passed = {label: f"{sum(c.passed for c in g.checks)} of {len(g.checks)} checks" for label, g in grades.items()}
 (run_dir / "grade.md").write_text("\n\n".join(

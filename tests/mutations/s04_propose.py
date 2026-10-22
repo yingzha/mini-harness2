@@ -65,4 +65,10 @@ MUTATIONS = [
                      'return Candidate(label, proposed, notes, "", (), result.steps)')],
         "expect": "test_an_editor_sees_the_evidence_and_edits_only_its_copy",
     },
+    {
+        "label": "copy_file may write outside the harness",
+        "file": "steps/s04_propose.py",
+        "replace": [('editable(inp["target"])', 'resolve_inside(session, inp["target"])')],
+        "expect": "test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly",
+    },
 ]

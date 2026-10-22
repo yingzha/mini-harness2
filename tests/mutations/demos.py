@@ -41,4 +41,13 @@ MUTATIONS = [
         ],
         "expect": "test_offline_demo_runs[d04_propose]",
     },
+    {
+        "label": "d06 imports a function that was renamed",
+        "file": "demos/d06_compose.py",
+        "replace": [
+            ("from steps.s06_compose import composer_prompt, contrastive_step",
+             "from steps.s06_compose import composer_prompts, contrastive_step"),
+        ],
+        "expect": "test_offline_demo_runs[d06_compose]",
+    },
 ]

@@ -14,12 +14,15 @@ Paper anchors
   is retried once with the validator's message; if it fails again the stage
   inherits the tree it started from, and the fallback is recorded."
 * Appendix H, Prompts 1 and 2: the editor's mission, in prompts/editor.md, with
-  one dimension section per scope (prompts/editor_inv.md, editor_dom.md).
+  one dimension section per scope (prompts/editor_inv.md, editor_dom.md). Its
+  last four sections, which the composer shares, are prompts/harness_rules.md.
 
 Design
 ------
 * An editor session is the Lesson 2 loop with other tools: it reads anything
-  under context/, writes and deletes only in context/harness/, and runs no code.
+  under context/, writes, copies into and deletes only in context/harness/,
+  and runs no code. The composer (Lesson 6) runs the same session,
+  `edit_session`, on more evidence.
 * The files are the proposal: whatever is in context/harness/ when the session
   ends is loaded back as the candidate. The editor's reply is only its notes.
 * Validation is a before_finish hook: when the editor says it's done, an
@@ -33,6 +36,7 @@ Design
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -51,7 +55,8 @@ _NOTES = re.compile(r"<notes>(.*?)</notes>", re.DOTALL)
 
 @dataclass(frozen=True)
 class Candidate:
-    """One editor's proposal (§2.2.1): a harness to probe, and why."""
+    """The harness an editing session left, and why (§2.2.1): an editor's
+    candidate to probe, or the composer's successor (Lesson 6)."""
     label: str                  # e.g. "inv1"
     harness: Harness            # the proposed tree; the tree it started from if it fell back
     notes: str                  # for each change, the moment in a trajectory behind it
@@ -65,11 +70,12 @@ def editor_prompt(prompts_dir: Path, scope: str, i: int, k: int) -> str:
     for candidate i of k on that dimension."""
     shared = (prompts_dir / "editor.md").read_text(encoding="utf-8")
     dimension = (prompts_dir / f"editor_{scope}.md").read_text(encoding="utf-8")
-    return shared.format(dimension=dimension.strip(), i=i, k=k)
+    rules = (prompts_dir / "harness_rules.md").read_text(encoding="utf-8")
+    return shared.format(dimension=dimension.strip(), rules=rules.strip(), i=i, k=k)
 
 
-def build_context(context: Path, task: Task, harness: Harness, refs: Sequence[ExecutionRecord]) -> Path:
-    """Lay out an editor's evidence as files and return the harness folder it edits:
+def build_context(context: Path, task: Task, harness: Harness, refs: Sequence[ExecutionRecord]) -> None:
+    """Lay out an editor's evidence as files:
 
         task.md, files/          the task, as the agent got it
         harness/                 the harness it ran with: the editor's copy
@@ -79,32 +85,47 @@ def build_context(context: Path, task: Task, harness: Harness, refs: Sequence[Ex
     write_task(task, context)
     write_harness(harness, context / "harness")
     for record in refs:
-        rollout = context / "rollouts" / record.label
-        rollout.mkdir(parents=True)   # a second run with the same label would overwrite the first
-        (rollout / "trajectory.md").write_text(render_record(record), encoding="utf-8")
-        for path, text in record.deliverable.items():
-            target = resolve_inside(rollout / "deliverable", path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text, encoding="utf-8")
+        write_rollout(record, context / "rollouts" / record.label)
     (context / "library").mkdir()
-    return context / "harness"
+
+
+def write_rollout(record: ExecutionRecord, folder: Path) -> None:
+    """A run as evidence: folder/trajectory.md, and what it produced under folder/deliverable/."""
+    folder.mkdir(parents=True)   # a second run with the same label would overwrite the first
+    (folder / "trajectory.md").write_text(render_record(record), encoding="utf-8")
+    for path, text in record.deliverable.items():
+        target = resolve_inside(folder / "deliverable", path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
 
 
 def editor_tools(session: Path, harness_dir: Path) -> list[Tool]:
-    """Read anything in the session, write or delete only in the harness copy.
-    Nothing runs code: an editor reads scripts and plugins as text."""
+    """Read anything in the session; write, copy into or delete only in the
+    harness copy. Nothing runs code: an editor reads scripts and plugins as text."""
+
+    def editable(rel: str) -> Path:
+        path = resolve_inside(session, rel)
+        if not path.is_relative_to(harness_dir.resolve()):
+            raise ValueError(f"{rel!r} is outside the harness you edit")
+        return path
+
+    def copy_file(inp: Mapping[str, Any]) -> ToolResult:
+        source, target = resolve_inside(session, inp["source"]), editable(inp["target"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        return ToolResult(f"Copied {inp['source']} to {inp['target']}")
 
     def delete_file(inp: Mapping[str, Any]) -> ToolResult:
-        path = resolve_inside(session, inp["path"])
-        if not path.is_relative_to(harness_dir.resolve()):
-            raise ValueError(f"{inp['path']!r} is outside the harness you edit")
-        path.unlink()
+        editable(inp["path"]).unlink()
         return ToolResult(f"Deleted {inp['path']}")
 
+    path = {"type": "string"}
     return [*file_tools(session, harness_dir),
+            Tool("copy_file", "Copy a file exactly, e.g. a component from another harness into yours.",
+                 {"type": "object", "properties": {"source": path, "target": path}, "required": ["source", "target"]},
+                 copy_file),
             Tool("delete_file", "Delete a file, to remove that component.",
-                 {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
-                 delete_file)]
+                 {"type": "object", "properties": {"path": path}, "required": ["path"]}, delete_file)]
 
 
 class _ValidateOnFinish:
@@ -132,10 +153,18 @@ class _ValidateOnFinish:
 def propose(llm: LLM, system: str, task: Task, harness: Harness, refs: Sequence[ExecutionRecord],
             session: Path, *, max_turns: int, label: str) -> Candidate:
     """One editor session (system: from editor_prompt) on the evidence, in the
-    folder `session`. Returns the harness it left, or the starting harness if
-    that is invalid or the session didn't finish."""
-    harness_dir = build_context(session / "context", task, harness, refs)
-    result = run_agent_loop(llm, "editor", system, _START, editor_tools(session, harness_dir),
+    folder `session`."""
+    build_context(session / "context", task, harness, refs)
+    return edit_session(llm, "editor", system, harness, session, max_turns=max_turns, label=label)
+
+
+def edit_session(llm: LLM, role: str, system: str, harness: Harness, session: Path, *, max_turns: int,
+                 label: str) -> Candidate:
+    """Run an editing session (as `role`: editor or composer) on the evidence in
+    session/context/, whose harness/ holds `harness`. Returns the harness it left, or `harness` itself
+    if that is invalid or the session didn't finish."""
+    harness_dir = session / "context" / "harness"
+    result = run_agent_loop(llm, role, system, _START, editor_tools(session, harness_dir),
                             max_turns=max_turns, hooks=_ValidateOnFinish(harness_dir))
     proposed, dropped = load_harness(harness_dir)
     notes = next((m[1].strip() for s in reversed(result.steps) if (m := _NOTES.search(s.text))), "")

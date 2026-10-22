@@ -9,6 +9,9 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
+# The paper: linked from the README (arXiv), not redistributed
+*.pdf
+
 # Generated at run time (rollout workspaces can hold anything the model wrote)
 runs/
 data/

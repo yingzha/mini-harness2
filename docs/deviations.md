@@ -4,6 +4,7 @@ Each one follows from the same question: does the paper's rule guard a failure t
 
 ## The executor and its harness
 
+- **The executor is Claude Haiku 5.5 at low effort**, standing in for the paper's weaker executors (Gemini 3.5 Flash, GLM-5). On the ticket task, one run at medium effort passed 271 of 273 checks, which leaves the improver almost nothing to work on; one run at low effort passed 254. These are single runs on one task: the same harness run twice on it has differed by 15 checks.
 - **A small custom agent instead of OpenCode or Codex.** Tools: `list_files`, `read_file`, `write_file`, `run_python` (no shell), plus `load_skill` and `run_subagent` when the harness has skills or subagents. A rollout is capped at 40 turns (the paper: 200) and each code run at 60 s; there is no separate wall-clock cap, since those two already bound it.
 - **Plugins are Python** (`plugin/<name>.py`), not TypeScript, because our executor is a Python loop. They have two hooks: `after_tool` (append a note to a tool result) and `before_finish` (keep the agent working, at most twice). Subagents can't delegate again and don't run plugins.
 - **No "template braces" rule.** The paper forbids `{{` and `{%` in always-on text because its runtime renders those files with Jinja. Ours doesn't template, so there is nothing to break.

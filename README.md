@@ -17,7 +17,7 @@ for each task in the stream:
 
 Two models play the roles, as in the paper's weak-executor, strong-editor setup:
 
-- **Executor:** Claude Haiku 5.5, at low effort, runs each task inside the harness. (At medium effort it passed 271 of our test task's 273 checks, leaving the editors little to improve.)
+- **Executor:** Claude Haiku 5.5, at low effort, runs each task inside the harness. A weaker executor leaves the improver something to fix; [docs/deviations.md](docs/deviations.md) says why low effort.
 - **Improver:** Claude Opus 5.5 proposes edits, composes them, selects outputs and reflects on what worked.
 
 ## Quick start

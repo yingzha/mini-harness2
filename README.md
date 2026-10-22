@@ -75,7 +75,3 @@ Then, as you need them:
 - [docs/safety.md](docs/safety.md): the sandbox model-written code runs in, and why no grade reaches the method.
 - [docs/testing.md](docs/testing.md): offline tests against a scripted API, and mutation testing.
 - [docs/deviations.md](docs/deviations.md): where and why this differs from the paper.
-
-## License
-
-[MIT](LICENSE).

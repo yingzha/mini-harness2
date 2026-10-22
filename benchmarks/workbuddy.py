@@ -59,12 +59,14 @@ def grade(sandbox: Sandbox, folder: Path, workspace: Path, *, timeout_s: float =
     # Their test module puts /workspace first on sys.path, so a file the agent wrote
     # there under the name of one of their modules (eval_core.py) would replace
     # their checks. The workspace goes to WORKDIR instead, and their own variables
-    # point their code at it.
+    # point their code at it. Their module names the deliverable as a default for
+    # WB_BENCH_OUTPUT_PATH or as DEFAULT_OUTPUT_PATH; it may be a file or the bare
+    # /workspace, when the whole workspace is the deliverable.
     env.update(WB_BENCH_CASE_DIR=WORKDIR, WB_BENCH_VERIFIER_LOGS="/tmp/verifier")
-    default = re.search(r'"WB_BENCH_OUTPUT_PATH",\s*"/workspace/([^"]+)"',
+    default = re.search(r"""(?:"WB_BENCH_OUTPUT_PATH",\s*|DEFAULT_OUTPUT_PATH\s*=\s*)["']/workspace(/[^"']*)?["']""",
                         (tests / "grading" / "test_verify.py").read_text(encoding="utf-8"))
     if default:
-        env["WB_BENCH_OUTPUT_PATH"] = f"{WORKDIR}/{default.group(1)}"
+        env["WB_BENCH_OUTPUT_PATH"] = WORKDIR + (default.group(1) or "")
     done = sandbox.run(["/opt/venv/bin/python", "-I", "-c", _CHECK_RUNNER], workspace, writable=False,
                        timeout_s=timeout_s, readonly={"/tests": tests}, env=env, max_output=2_000_000)
     if done.returncode != 0:

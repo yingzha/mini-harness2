@@ -24,6 +24,24 @@ MUTATIONS = [
         "expect": "test_its_own_checks_grade_the_workspace",
     },
     {
+        "label": "the bare /workspace not taken as a deliverable path",
+        "file": "benchmarks/workbuddy.py",
+        "replace": [
+            ("""/workspace(/[^"']*)?["']""",
+             """/workspace(/[^"']+)["']"""),
+        ],
+        "expect": "test_checks_find_the_deliverable_however_the_task_names_it[whole-workspace]",
+    },
+    {
+        "label": "a DEFAULT_OUTPUT_PATH constant not read",
+        "file": "benchmarks/workbuddy.py",
+        "replace": [
+            ("""|DEFAULT_OUTPUT_PATH\\s*=\\s*)""",
+             """)"""),
+        ],
+        "expect": "test_checks_find_the_deliverable_however_the_task_names_it[module-constant]",
+    },
+    {
         "label": "check list cut at the tool-output size",
         "file": "benchmarks/workbuddy.py",
         "replace": [

@@ -36,7 +36,8 @@ import json
 from pathlib import Path
 def evaluate(output_path, gold_path):
     gold = json.loads(Path(gold_path).read_text())
-    text = Path(output_path).read_text() if Path(output_path).exists() else ""
+    output = Path(output_path) / "report.md" if Path(output_path).is_dir() else Path(output_path)
+    text = output.read_text() if output.exists() else ""
     print("evaluating", output_path)
     return {"checks": [{"name": f"mentions_{k}", "passed": str(v) in text, "detail": f"expected {v!r} " * 20}
                        for k, v in gold.items()]}
@@ -86,6 +87,26 @@ def test_its_own_checks_grade_the_workspace(sandbox, task_folder, tmp_path):
     partial = grade(sandbox, task_folder, workspace_with(task_folder, tmp_path / "b", {"report.md": "17 tickets"}))
     assert len(full.checks) == len(GOLD) and full.score == 1.0
     assert [c.name for c in partial.checks if c.passed] == ["mentions_tickets"]
+
+
+@pytest.mark.parametrize(("env", "output_line"), [
+    ('WB_BENCH_OUTPUT_PATH = "/workspace"\n',
+     'OUTPUT_PATH = os.environ.get("WB_BENCH_OUTPUT_PATH", "/workspace")'),
+    ("",
+     "DEFAULT_OUTPUT_PATH = '/workspace/report.md'\n"
+     'OUTPUT_PATH = os.environ.get("WB_BENCH_OUTPUT_PATH", DEFAULT_OUTPUT_PATH)'),
+], ids=["whole-workspace", "module-constant"])
+def test_checks_find_the_deliverable_however_the_task_names_it(sandbox, task_folder, tmp_path, env, output_line):
+    """Guards: a task that names its deliverable as the bare /workspace (the
+    whole workspace is the output) or through a DEFAULT_OUTPUT_PATH constant,
+    left pointing at /workspace, where the sandbox mounts nothing: every check
+    fails on every rollout, and the task looks impossible rather than broken."""
+    (task_folder / "tests" / "grading" / "test_verify.py").write_text(TEST_VERIFY.replace(
+        'OUTPUT_PATH = os.environ.get("WB_BENCH_OUTPUT_PATH", "/workspace/report.md")', output_line))
+    (task_folder / "tests" / "verifier.toml").write_text(
+        '[env]\nWB_BENCH_GOLD_PATH = "/tests/gold/gold_answer.json"\n' + env)
+    report = "\n".join(str(v) for v in GOLD.values())
+    assert grade(sandbox, task_folder, workspace_with(task_folder, tmp_path, {"report.md": report})).score == 1.0
 
 
 def test_an_agent_cannot_grade_itself(sandbox, task_folder, tmp_path):

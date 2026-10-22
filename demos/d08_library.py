@@ -57,8 +57,7 @@ if added:
 else:
     print("\nNothing added to the library: H★ is H0 and no lesson was supported.")
 
-delivered = {r.label: r for r in [*result.step.refs, *result.step.successors.values()]}[result.chosen]
-g = workbuddy.grade(sandbox, folder, delivered.workspace)
+g = workbuddy.grade(sandbox, folder, result.delivered.workspace)
 (run_dir / "grade.md").write_text("".join(f"- {c.name}: {c.detail}\n" for c in g.checks if not c.passed))
 print(f"For you only, never for the pipeline: the delivered output passed {sum(c.passed for c in g.checks)} "
       f"of {len(g.checks)} checks.")

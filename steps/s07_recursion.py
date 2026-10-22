@@ -69,6 +69,11 @@ class Recursion:
     adopted: Harness             # H★: the harness that produced it
     selection: Selection | None  # None at k = 1, where there is nothing to select
 
+    @property
+    def delivered(self) -> ExecutionRecord:
+        """The run whose output is submitted: a run of H, or of a composed harness."""
+        return {r.label: r for r in [*self.step.refs, *self.step.successors.values()]}[self.chosen]
+
 
 def selector_prompt(prompts_dir: Path, n: int) -> str:
     """Prompt 5, for choosing among n outputs."""

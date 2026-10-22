@@ -119,5 +119,8 @@ ROOT = Path(__file__).resolve().parent
 BASE_HARNESS_DIR = ROOT / "base_harness"
 PROMPTS_DIR = ROOT / "prompts"   # the improver's prompts (Appendix H)
 RUNS_DIR = ROOT / "runs"
-# The real WorkBuddy-Bench Office task we test with, if you have it (git-ignored; see README)
-WORKBUDDY_TASK = ROOT / "data" / "wb-bench-office-v1.0" / "tasks" / "service-channel-ticket-daily"
+# Real WorkBuddy-Bench Office tasks, if you have them (git-ignored; see README)
+_WORKBUDDY_TASKS = ROOT / "data" / "wb-bench-office-v1.0" / "tasks"
+WORKBUDDY_TASK = _WORKBUDDY_TASKS / "service-channel-ticket-daily"        # Lessons 3 to 8
+WORKBUDDY_STREAM = (WORKBUDDY_TASK,                                          # Lesson 9, in this order
+                    _WORKBUDDY_TASKS / "market-daily-brief-a-share-recap")

@@ -11,7 +11,8 @@ from steps.s01_harness import Harness, load_harness
 from steps.s02_executor import ExecutionRecord
 from steps.s03_tasks import Task
 from steps.s07_recursion import anonymize, parallel_recursion, select
-from tests.scripted_api import ScriptedAPI, reply, text, tool_use
+from tests.routes import chooses, routed
+from tests.scripted_api import ScriptedAPI, reply, text
 
 H0, _ = load_harness(config.BASE_HARNESS_DIR)
 EDITOR = config.LLM_SETTINGS.roles["editor"].model
@@ -27,10 +28,6 @@ def run(label: str, harness: Harness, deliverable: dict[str, str]) -> ExecutionR
 OUTPUTS = {"base1": run("base1", H0, {"report.md": "total 5\n"}),
            "composed1": run("composed1", Harness({**H0.files, "guardrails.md": "Rule 1.\n"}), {"report.md": "total 6\n"}),
            "composed2": run("composed2", Harness({**H0.files, "guardrails.md": "Rule 2.\n"}), {})}
-
-
-def chooses(id_: str) -> dict:
-    return reply(text(f"<why>{id_} matches the request.</why>\n```choice\n{id_}\n```"), model=EDITOR)
 
 
 def test_the_selector_sees_only_artifacts_and_its_choice_maps_back(tmp_path):
@@ -63,24 +60,6 @@ def test_an_unreadable_choice_goes_back_once_then_falls_back_to_the_first(tmp_pa
 
     assert "choice block" in api.requests[1].body["messages"][-1]["content"] and len(api.requests) == 2
     assert selection.chosen == "base1" and "no readable choice" in selection.fallback
-
-
-def routed(selector_picks: str | None = None):
-    """Answers by who is asking: sessions run side by side, so order is not fixed."""
-    def answer(body: dict) -> dict:
-        system, turn = body["system"], len(body["messages"])
-        if "candidate answers should be delivered" in system:
-            return chooses(selector_picks)
-        for j in (1, 2):
-            if f"You are composer {j} of" in system:
-                if turn == 1:
-                    write = tool_use("w", "write_file", {"path": "context/harness/guardrails.md", "content": f"Rule {j}.\n"})
-                    return reply(write, model=EDITOR, stop_reason="tool_use")
-                return reply(text(f"<notes>kept -> rule {j} -> h0 never reopened its report</notes>"), model=EDITOR)
-        if body["model"] == EDITOR:
-            return reply(text("<notes>KEEP_BASE</notes>"), model=EDITOR)   # the editors
-        return reply(text("done"), model=EXECUTOR)                           # every run
-    return answer
 
 
 def test_parallel_recursion_adopts_the_harness_whose_output_is_delivered(sandbox, tmp_path):

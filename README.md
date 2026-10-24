@@ -67,7 +67,7 @@ Each lesson is one module in `steps/`, built on the ones before it, so read them
 Start with these two:
 
 - [docs/lessons.md](docs/lessons.md): each lesson in more detail, with its demo and what it costs.
-- [docs/running.md](docs/running.md): setup, getting the tasks, running the demos, where results go, cleanup.
+- [docs/running.md](docs/running.md): setup, getting the tasks, running the demos, resuming a stream, where results go, cleanup.
 
 Then, as you need them:
 

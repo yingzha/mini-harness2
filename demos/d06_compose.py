@@ -12,6 +12,7 @@ A live run is kept under runs/demo_l6_<time>/:
   step/successors/composed1/          H′'s run (its workspace); successor.md its trajectory
   composed.diff, composed.md   H′ against H0, and the composer's decisions
   grade.md                  every run's failed checks: for you only
+  usage.jsonl               every model call's tokens and cost, by session
 """
 
 import sys
@@ -40,7 +41,7 @@ task = workbuddy.load_task(folder)
 stock, _ = load_harness(config.BASE_HARNESS_DIR)
 h0 = initial_harness(stock, workbuddy.REFERENCE)
 run_dir = config.RUNS_DIR / time.strftime("demo_l6_%Y%m%d-%H%M%S")
-llm = LLM.from_env(config.LLM_SETTINGS)
+llm = LLM.from_env(config.LLM_SETTINGS, usage_log=run_dir / "usage.jsonl")
 sandbox = Sandbox.from_docker(config.SANDBOX)
 
 print("\nRunning H0 once, the reference (a minute or two)...", flush=True)
@@ -66,7 +67,7 @@ print("\n--- composer: " + (f"FELL BACK to H0: {composed.fallback}" if composed.
 print("\n" + contrast(ref, successor).split("\n## ")[0].strip())
 
 runs = {"h0": ref, **xi.probes, "successor": successor}
-grades = {label: workbuddy.grade(sandbox, folder, r.workspace) for label, r in runs.items()}
+grades = {label: workbuddy.grade(sandbox, folder, r.workspace, final_reply=r.final_text) for label, r in runs.items()}
 passed = {label: f"{sum(c.passed for c in g.checks)} of {len(g.checks)} checks" for label, g in grades.items()}
 (run_dir / "grade.md").write_text("\n\n".join(
     f"## {label}: {passed[label]}\n" + "".join(f"- {c.name}: {c.detail}\n" for c in g.checks if not c.passed)

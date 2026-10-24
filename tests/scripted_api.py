@@ -58,6 +58,7 @@ def reply(
     output_tokens: int = 5,
     cache_read: int | None = None,
     cache_write: int | None = None,
+    thinking: int | None = None,
 ) -> dict:
     """A Messages API response body, as the server would send it."""
     usage: dict[str, Any] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
@@ -65,6 +66,8 @@ def reply(
         usage["cache_read_input_tokens"] = cache_read
     if cache_write is not None:
         usage["cache_creation_input_tokens"] = cache_write
+    if thinking is not None:
+        usage["output_tokens_details"] = {"thinking_tokens": thinking}
     return {
         "id": "msg_scripted", "type": "message", "role": "assistant", "model": model,
         "content": list(content), "stop_reason": stop_reason, "stop_sequence": None, "usage": usage,

@@ -11,8 +11,9 @@ conditions at the same time (in the pipeline, Lesson 6, the reference is the
 run the editors read).
 
 Kept under runs/demo_l5_<time>/: each run's workspace (workspaces/<label>/) and
-trajectory (<label>.md), each contrast (<label>-vs-h0.md), and grade.md, every
-run's failed checks: for you only.
+trajectory (<label>.md), each contrast (<label>-vs-h0.md), usage.jsonl (every
+model call's tokens and cost), and grade.md, every run's failed checks: for you
+only.
 """
 
 import sys
@@ -46,7 +47,7 @@ for proposal in sorted(editors.glob("*.diff")):
 print(f"Candidates from {editors.parent.relative_to(config.ROOT)}: {', '.join(list(harnesses)[1:]) or 'none'}")
 
 run_dir = config.RUNS_DIR / time.strftime("demo_l5_%Y%m%d-%H%M%S")
-llm = LLM.from_env(config.LLM_SETTINGS)
+llm = LLM.from_env(config.LLM_SETTINGS, usage_log=run_dir / "usage.jsonl")
 sandbox = Sandbox.from_docker(config.SANDBOX)
 files = write_task(task, run_dir / "task")
 print(f"\nProbing {', '.join(harnesses)} side by side (Haiku; a few minutes)...", flush=True)
@@ -59,7 +60,7 @@ for label, record in records.items():
         (run_dir / f"{label}-vs-h0.md").write_text(text)
         print("\n" + text.split("\n## ")[0].strip())   # the table; the diff is in the file
 
-grades = {label: workbuddy.grade(sandbox, folder, record.workspace) for label, record in records.items()}
+grades = {label: workbuddy.grade(sandbox, folder, record.workspace, final_reply=record.final_text) for label, record in records.items()}
 passed = {label: f"{sum(c.passed for c in g.checks)} of {len(g.checks)} checks" for label, g in grades.items()}
 (run_dir / "grade.md").write_text("\n\n".join(
     f"## {label}: {passed[label]}\n" + "".join(f"- {c.name}: {c.detail}\n" for c in g.checks if not c.passed)

@@ -122,5 +122,26 @@ RUNS_DIR = ROOT / "runs"
 # Real WorkBuddy-Bench Office tasks, if you have them (git-ignored; see docs/running.md)
 _WORKBUDDY_TASKS = ROOT / "data" / "wb-bench-office-v1.0" / "tasks"
 WORKBUDDY_TASK = _WORKBUDDY_TASKS / "service-channel-ticket-daily"        # Lessons 3 to 8
-WORKBUDDY_STREAM = (WORKBUDDY_TASK,                                          # Lesson 9, in this order
-                    _WORKBUDDY_TASKS / "market-daily-brief-a-share-recap")
+# Lesson 9's streams, each in the order it runs (demos/d09_pipeline.py --stream <name>)
+WORKBUDDY_STREAMS = MappingProxyType({
+    # The lesson's own: the task above, then a sibling
+    "lesson": (WORKBUDDY_TASK, _WORKBUDDY_TASKS / "market-daily-brief-a-share-recap"),
+    # Every Office task this runtime can attempt and grade (text in, text out, checks that
+    # need only the standard library), in name order so that no one picked the order
+    "text-office": tuple(_WORKBUDDY_TASKS / name for name in (
+        "api-usage-explain-cli-l3-001",
+        "calendar-dida-sync-state",
+        "daily-creation-checkpoint-recovery",
+        "effective-control-state-L5-036",
+        "effective-sop-reconstruction-L5-034",
+        "inspection-notice-provenance-L4-032",
+        "market-daily-brief-a-share-recap",
+        "monitoring-weekly-draft-followup",       # 4 of its 100 checks can't pass here: docs/deviations.md
+        "prd-system-design-task-breakdown",
+        "priority-sync-notification-pipeline",
+        "release-phase-gate-progression",
+        "service-channel-ticket-daily",
+        "wechat-tech-topic-package-hardened",
+        "xiaohongshu-psychology-note-pack",
+    )),
+})

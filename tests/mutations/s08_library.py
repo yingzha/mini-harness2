@@ -65,4 +65,10 @@ MUTATIONS = [
         "replace": [('        shutil.copytree(library, context / "library")\n', '        (context / "library").mkdir()\n')],
         "expect": "test_editors_read_the_library_but_cannot_change_it",
     },
+    {
+        "label": "the reflector's calls logged without its session",
+        "file": 'steps/s08_library.py',
+        "replace": [('session=str(session), max_turns=max_turns,', 'session="", max_turns=max_turns,')],
+        "expect": 'test_every_call_in_a_stream_is_logged_under_its_own_session',
+    },
 ]

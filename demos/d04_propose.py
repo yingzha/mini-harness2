@@ -9,6 +9,7 @@ A live run is kept under runs/demo_l4_<time>/:
   editors/<label>/context/    exactly what that editor saw, with its harness/ as it left it
   editors/<label>.diff        its candidate against H0, and <label>.md its notes
   grade.md                    how H0 scored, for you: no editor ever sees it
+  usage.jsonl                 every model call's tokens and cost, by session
 """
 
 import sys
@@ -39,7 +40,7 @@ task = workbuddy.load_task(folder)
 stock, _ = load_harness(config.BASE_HARNESS_DIR)
 h0 = initial_harness(stock, workbuddy.REFERENCE)
 run_dir = config.RUNS_DIR / time.strftime("demo_l4_%Y%m%d-%H%M%S")
-llm = LLM.from_env(config.LLM_SETTINGS)
+llm = LLM.from_env(config.LLM_SETTINGS, usage_log=run_dir / "usage.jsonl")
 sandbox = Sandbox.from_docker(config.SANDBOX)
 
 print("\nRunning H0 once: the reference run the editors learn from (a minute or two)...", flush=True)
@@ -68,7 +69,7 @@ for c in candidates:
           + (f"\n    dropped (off the editable surface): {', '.join(c.dropped)}" if c.dropped else "")
           + f"\n{c.notes}")
 
-g = workbuddy.grade(sandbox, folder, ref.workspace)
+g = workbuddy.grade(sandbox, folder, ref.workspace, final_reply=ref.final_text)
 (run_dir / "grade.md").write_text("\n".join(f"- [{'x' if c.passed else ' '}] {c.name}: {c.detail}" for c in g.checks))
 print(f"\nFor you only: H0 scored {g.score:.2f} ({sum(c.passed for c in g.checks)} of {len(g.checks)} checks). "
       "Compare grade.md's failures with what the editors noticed.")

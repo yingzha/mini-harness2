@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import tarfile
+import tempfile
 import tomllib
 from pathlib import Path
 from types import MappingProxyType
@@ -52,23 +53,43 @@ def load_task(folder: Path) -> Task:
     return Task(folder.name, (folder / "instruction.md").read_text(encoding="utf-8"), MappingProxyType(files))
 
 
-def grade(sandbox: Sandbox, folder: Path, workspace: Path, *, timeout_s: float = 300) -> Grade:
-    """Run the task's own deterministic checks on a finished workspace."""
+def _moved(path: str) -> str:
+    """A path their code is given under /workspace, where the sandbox mounts the workspace instead."""
+    return WORKDIR + path[len("/workspace"):] if path == "/workspace" or path.startswith("/workspace/") else path
+
+
+def grade(sandbox: Sandbox, folder: Path, workspace: Path, *, final_reply: str = "", timeout_s: float = 300) -> Grade:
+    """Run the task's own deterministic checks on a finished workspace. `final_reply`
+    is the agent's last message: some tasks check it, and the benchmark's runner
+    saves it as /workspace/final_answer.md."""
     tests = folder / "tests"
-    env = dict(tomllib.loads((tests / "verifier.toml").read_text(encoding="utf-8")).get("env", {}))
+    verify = (tests / "grading" / "test_verify.py").read_text(encoding="utf-8")
     # Their test module puts /workspace first on sys.path, so a file the agent wrote
     # there under the name of one of their modules (eval_core.py) would replace
-    # their checks. The workspace goes to WORKDIR instead, and their own variables
-    # point their code at it. Their module names the deliverable as a default for
-    # WB_BENCH_OUTPUT_PATH or as DEFAULT_OUTPUT_PATH; it may be a file or the bare
-    # /workspace, when the whole workspace is the deliverable.
+    # their checks. The workspace goes to WORKDIR instead, every path their
+    # variables give under /workspace is moved there, and /workspace holds only
+    # final_answer.md, which can't be imported. Their module may also name the
+    # deliverable itself, as a default for WB_BENCH_OUTPUT_PATH or as
+    # DEFAULT_OUTPUT_PATH: a file, or the bare /workspace when the whole workspace
+    # is the deliverable. Checks that need the benchmark runner's trajectory log
+    # can't pass here: we don't write one.
+    env = {name: _moved(str(value))
+           for name, value in tomllib.loads((tests / "verifier.toml").read_text(encoding="utf-8")).get("env", {}).items()}
     env.update(WB_BENCH_CASE_DIR=WORKDIR, WB_BENCH_VERIFIER_LOGS="/tmp/verifier")
     default = re.search(r"""(?:"WB_BENCH_OUTPUT_PATH",\s*|DEFAULT_OUTPUT_PATH\s*=\s*)["']/workspace(/[^"']*)?["']""",
-                        (tests / "grading" / "test_verify.py").read_text(encoding="utf-8"))
+                        verify)
     if default:
         env["WB_BENCH_OUTPUT_PATH"] = WORKDIR + (default.group(1) or "")
-    done = sandbox.run(["/opt/venv/bin/python", "-I", "-c", _CHECK_RUNNER], workspace, writable=False,
-                       timeout_s=timeout_s, readonly={"/tests": tests}, env=env, max_output=2_000_000)
+    if "WB_BENCH_OUTPUT_PATH" not in env and "WB_BENCH_OUTPUT_PATH" in verify:
+        # Their own default would point at /workspace, so every check would fail
+        # quietly: the task would look impossible rather than broken.
+        raise RuntimeError(f"{folder.name}: can't tell where its checks look for the deliverable: its test "
+                           "module names it in a form grade() doesn't know")
+    with tempfile.TemporaryDirectory() as reply:
+        (Path(reply) / "final_answer.md").write_text(final_reply, encoding="utf-8")
+        done = sandbox.run(["/opt/venv/bin/python", "-I", "-c", _CHECK_RUNNER], workspace, writable=False,
+                           timeout_s=timeout_s, readonly={"/tests": tests, "/workspace": Path(reply)}, env=env,
+                           max_output=2_000_000)
     if done.returncode != 0:
         raise RuntimeError(f"{folder.name}: its checks did not run: {done.stderr[-800:]}")
     return Grade(tuple(Check(name, passed, detail) for name, passed, detail in json.loads(done.stdout)))

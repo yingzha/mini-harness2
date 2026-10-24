@@ -399,7 +399,8 @@ def subagent_tool(llm: LLM, sandbox: Sandbox, harness: Harness, workspace: Path,
         if agent is None:
             return ToolResult(f"No subagent {inp['name']!r}. Available: {', '.join(sorted(agents))}.", is_error=True)
         tools = [*file_tools(workspace, workspace), run_python_tool(sandbox, workspace, limits.tool_timeout_s)]
-        sub = run_agent_loop(llm, "executor", agent.body, inp["prompt"], tools, max_turns=limits.subagent_max_turns)
+        sub = run_agent_loop(llm, "executor", agent.body, inp["prompt"], tools,
+                             session=f"{workspace} subagent {inp['name']}", max_turns=limits.subagent_max_turns)
         if sub.stop_reason != "end_turn" or not sub.final_text.strip():
             return ToolResult(f"The subagent stopped ({sub.stop_reason}) without an answer.",
                               is_error=True, subtrace=sub.steps)
@@ -520,8 +521,9 @@ def _run_tool(tools: Mapping[str, Tool], name: str, inp: Mapping[str, Any]) -> T
 
 
 def run_agent_loop(llm: LLM, role: str, system: str, task: str, tools: list[Tool], *,
-                   max_turns: int, hooks: Hooks | None = None) -> LoopResult:
+                   session: str, max_turns: int, hooks: Hooks | None = None) -> LoopResult:
     """Call the model, run the tools it asks for, repeat until it stops or the turn cap.
+    `session` names this conversation (its folder) in the usage log.
 
     Two API rules hold throughout (see Lesson 0): each response is appended
     unchanged, and history is append-only. All tool results for one turn go
@@ -535,7 +537,7 @@ def run_agent_loop(llm: LLM, role: str, system: str, task: str, tools: list[Tool
     nudges = 0
 
     for turn in range(1, max_turns + 1):
-        response = llm.call(role, system, messages, definitions)
+        response = llm.call(role, system, messages, definitions, session=session)
         messages.append({"role": "assistant", "content": response.content})
         text = text_of(response)
         uses = [b for b in response.content if b.type == "tool_use"]
@@ -626,7 +628,7 @@ def execute(llm: LLM, sandbox: Sandbox, harness: Harness, task: str, files_dir: 
     tools += [t for t in (skill_tool(harness), subagent_tool(llm, sandbox, harness, workspace, limits)) if t]
     hooks = plugin_hooks(harness, sandbox, workspace, baseline, limits.tool_timeout_s)
     result = run_agent_loop(llm, "executor", harness.always_on_text(), task, tools,
-                            max_turns=limits.max_turns, hooks=hooks)
+                            session=str(workspace), max_turns=limits.max_turns, hooks=hooks)
     deliverable = {path: (workspace / path).read_text(encoding="utf-8", errors="replace")
                    for path in changed_files(workspace, baseline)}
     return ExecutionRecord(label, harness, result.steps, deliverable, result.final_text,

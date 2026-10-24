@@ -4,7 +4,8 @@
 
 Runs the executor on a small hand-written task twice: once with the stock
 harness H0, once with an example harness whose guardrail, skill, script and
-plugin all take part. Workspaces and full trajectories are kept under runs/.
+plugin all take part. Workspaces, full trajectories and usage.jsonl (every model
+call's tokens and cost) are kept under runs/demo_l2_<time>/.
 """
 
 import time
@@ -73,7 +74,7 @@ files = run_dir / "task_files"   # the workspace a rollout starts from
 h0, _ = load_harness(config.BASE_HARNESS_DIR)
 harnesses = {"base": h0, "example": Harness({**h0.files, **EXAMPLE_FILES})}
 
-llm = LLM.from_env(config.LLM_SETTINGS)
+llm = LLM.from_env(config.LLM_SETTINGS, usage_log=run_dir / "usage.jsonl")
 sandbox = Sandbox.from_docker(config.SANDBOX)
 print(f"Task: {TASK}\n\nExpected (worked out by hand):\n{EXPECTED}")
 for label, harness in harnesses.items():

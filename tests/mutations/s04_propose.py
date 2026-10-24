@@ -71,4 +71,10 @@ MUTATIONS = [
         "replace": [('editable(inp["target"])', 'resolve_inside(session, inp["target"])')],
         "expect": "test_the_composer_sees_every_candidate_with_its_run_and_copies_exactly",
     },
+    {
+        "label": "an editing session's calls logged without its session",
+        "file": 'steps/s04_propose.py',
+        "replace": [('session=str(session), max_turns=max_turns,', 'session="", max_turns=max_turns,')],
+        "expect": 'test_every_call_in_a_stream_is_logged_under_its_own_session',
+    },
 ]

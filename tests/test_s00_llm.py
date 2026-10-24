@@ -1,5 +1,6 @@
 """Lesson 0 tests. Each docstring names the real failure the test guards against."""
 
+import json
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -8,7 +9,7 @@ from anthropic.types.beta import BetaUsage
 
 import config
 from config import Price
-from steps.s00_llm import LLM, cost_of, workspace_headers
+from steps.s00_llm import LLM, UsageMeter, cost_of, workspace_headers
 from tests.scripted_api import ScriptedAPI, reply, text
 
 SETTINGS = config.LLM_SETTINGS
@@ -68,6 +69,52 @@ def test_meter_costs_follow_reported_usage():
     assert usage["executor"].cost_usd == pytest.approx((1000 * 1 + 500 * 2 + 2000 * 1) / 1e6)
     assert usage["editor"].cost_usd == pytest.approx((100 * 10 + 10 * 20 + 1000 * 1 + 200 * 12.5) / 1e6)
     assert usage["editor"].cache_read_tokens == 1000
+
+
+def test_every_call_leaves_a_line_with_its_own_usage(tmp_path, monkeypatch):
+    """Guards: a run leaving no per-call record of its tokens, so where its
+    money went (which session and role, cache reads against writes, thinking,
+    when) can't be measured afterwards; the first call crashing because the run
+    folder doesn't exist yet; and the demos' runs logging nothing because
+    from_env drops the path."""
+    log = tmp_path / "run" / "usage.jsonl"
+    ticks = iter([100.0, 101.5, 103.0])
+    api = ScriptedAPI([
+        reply(text("a"), model=EXECUTOR, input_tokens=1000, output_tokens=500),
+        reply(text("b"), model=EDITOR, input_tokens=100, output_tokens=40, cache_read=900, cache_write=200, thinking=30),
+        reply(text("c"), model=EDITOR, input_tokens=5, output_tokens=8, cache_read=1100),
+    ])
+    llm = LLM(api.client(), SETTINGS, UsageMeter(SETTINGS.prices, log, clock=lambda: next(ticks)))
+    llm.call("executor", "sys", USER, session="t1/base/base1")
+    llm.call("editor", "sys", USER, session="t1/step/editors/inv1")
+    llm.call("editor", "sys", [*USER, {"role": "assistant", "content": "y"}, *USER], session="t1/step/editors/inv1")
+
+    lines = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [(x["session"], x["role"], x["input"], x["cache_read"], x["cache_write"], x["output"], x["thinking"])
+            for x in lines] == [("t1/base/base1", "executor", 1000, 0, 0, 500, None),
+                                ("t1/step/editors/inv1", "editor", 100, 900, 200, 40, 30),
+                                ("t1/step/editors/inv1", "editor", 5, 1100, 0, 8, None)]
+    assert [x["depth"] for x in lines] == [1, 1, 3] and [x["time"] for x in lines] == [100.0, 101.5, 103.0]
+    assert sum(x["cost"] for x in lines) == pytest.approx(sum(r.cost_usd for r in llm.meter.snapshot().values()))
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")   # never sent: no request is made
+    real = tmp_path / "real" / "usage.jsonl"
+    LLM.from_env(SETTINGS, usage_log=real).meter.record("executor", EXECUTOR, BetaUsage(input_tokens=1, output_tokens=1))
+    assert json.loads(real.read_text())["input"] == 1
+
+
+def test_a_usage_log_that_cannot_be_written_does_not_end_the_run(tmp_path):
+    """Guards: a full disk or an unwritable run folder making llm.call raise
+    after the response was paid for, so a logging problem ends an hours-long
+    run; and the warning repeating on every call."""
+    blocked = tmp_path / "usage.jsonl"
+    blocked.mkdir()   # a folder where the log file should be: opening it fails
+    api = ScriptedAPI([reply(text("a"), model=EXECUTOR), reply(text("b"), model=EXECUTOR)])
+    llm = LLM(api.client(), SETTINGS, UsageMeter(SETTINGS.prices, blocked))
+    with pytest.warns(UserWarning, match="can't be written") as warned:
+        assert llm.call("executor", "sys", USER).content[0].text == "a"
+        assert llm.call("executor", "sys", USER).content[0].text == "b"
+    assert len(warned) == 1 and llm.meter.snapshot()["executor"].calls == 2
 
 
 def test_fallback_served_by_an_unpriced_model_does_not_crash_the_run():

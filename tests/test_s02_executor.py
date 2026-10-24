@@ -283,7 +283,7 @@ def test_loop_returns_responses_unchanged_and_all_results_in_one_message(tmp_pat
               tool_use("t1", "write_file", {"path": "a.txt", "content": "hi"}),
               tool_use("t2", "read_file", {"path": "a.txt"})),
         done())
-    result = run_agent_loop(llm, "executor", "sys", "task", file_tools(tmp_path, tmp_path), max_turns=5)
+    result = run_agent_loop(llm, "executor", "sys", "task", file_tools(tmp_path, tmp_path), session="loop", max_turns=5)
 
     sent = api.requests[1].body["messages"]
     assert len(sent) == 3  # task, the assistant turn, ONE message with both results
@@ -300,7 +300,7 @@ def test_tool_failures_become_error_results_and_the_loop_goes_on(tmp_path):
     llm, api = scripted(
         calls(tool_use("t1", "no_such_tool", {}), tool_use("t2", "read_file", {"path": "missing.txt"})),
         done())
-    result = run_agent_loop(llm, "executor", "sys", "task", file_tools(tmp_path, tmp_path), max_turns=5)
+    result = run_agent_loop(llm, "executor", "sys", "task", file_tools(tmp_path, tmp_path), session="loop", max_turns=5)
     unknown, missing = tool_results(api, 1)
     assert unknown["is_error"] and "Unknown tool 'no_such_tool'" in unknown["content"]
     assert missing["is_error"] and "FileNotFoundError" in missing["content"]
@@ -310,7 +310,7 @@ def test_tool_failures_become_error_results_and_the_loop_goes_on(tmp_path):
 def test_loop_stops_at_the_turn_cap(tmp_path):
     """Guards: an agent that never stops calling tools running up cost forever."""
     llm, api = scripted(*[calls(tool_use(f"t{i}", "list_files", {})) for i in range(3)])
-    result = run_agent_loop(llm, "executor", "sys", "task", file_tools(tmp_path, tmp_path), max_turns=3)
+    result = run_agent_loop(llm, "executor", "sys", "task", file_tools(tmp_path, tmp_path), session="loop", max_turns=3)
     assert result.stop_reason == "max_turns"
     assert len(api.requests) == 3 and len(result.steps) == 3
 
@@ -322,7 +322,7 @@ def test_a_cut_off_tool_call_is_answered_but_not_run(tmp_path):
     llm, api = scripted(
         calls(tool_use("t1", "write_file", {"path": "big.txt", "content": "partial"}), stop_reason="max_tokens"),
         done())
-    run_agent_loop(llm, "executor", "sys", "task", file_tools(tmp_path, tmp_path), max_turns=5)
+    run_agent_loop(llm, "executor", "sys", "task", file_tools(tmp_path, tmp_path), session="loop", max_turns=5)
     [answer] = tool_results(api, 1)
     assert answer["tool_use_id"] == "t1" and answer["is_error"]
     assert not (tmp_path / "big.txt").exists()

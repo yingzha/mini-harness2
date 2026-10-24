@@ -90,23 +90,50 @@ def test_its_own_checks_grade_the_workspace(sandbox, task_folder, tmp_path):
 
 
 @pytest.mark.parametrize(("env", "output_line"), [
-    ('WB_BENCH_OUTPUT_PATH = "/workspace"\n',
+    ("",
      'OUTPUT_PATH = os.environ.get("WB_BENCH_OUTPUT_PATH", "/workspace")'),
     ("",
      "DEFAULT_OUTPUT_PATH = '/workspace/report.md'\n"
      'OUTPUT_PATH = os.environ.get("WB_BENCH_OUTPUT_PATH", DEFAULT_OUTPUT_PATH)'),
-], ids=["whole-workspace", "module-constant"])
+    ('WB_BENCH_OUTPUT_PATH = "/workspace/report.md"\n',
+     'OUTPUT_PATH = os.environ["WB_BENCH_OUTPUT_PATH"]'),
+], ids=["whole-workspace", "module-constant", "verifier-only"])
 def test_checks_find_the_deliverable_however_the_task_names_it(sandbox, task_folder, tmp_path, env, output_line):
     """Guards: a task that names its deliverable as the bare /workspace (the
-    whole workspace is the output) or through a DEFAULT_OUTPUT_PATH constant,
-    left pointing at /workspace, where the sandbox mounts nothing: every check
-    fails on every rollout, and the task looks impossible rather than broken."""
+    whole workspace is the output), through a DEFAULT_OUTPUT_PATH constant, or
+    only in verifier.toml, left pointing at /workspace, where the workspace
+    isn't: every check fails on every rollout, and the task looks impossible
+    rather than broken."""
     (task_folder / "tests" / "grading" / "test_verify.py").write_text(TEST_VERIFY.replace(
         'OUTPUT_PATH = os.environ.get("WB_BENCH_OUTPUT_PATH", "/workspace/report.md")', output_line))
     (task_folder / "tests" / "verifier.toml").write_text(
         '[env]\nWB_BENCH_GOLD_PATH = "/tests/gold/gold_answer.json"\n' + env)
     report = "\n".join(str(v) for v in GOLD.values())
     assert grade(sandbox, task_folder, workspace_with(task_folder, tmp_path, {"report.md": report})).score == 1.0
+
+
+def test_a_deliverable_named_in_an_unknown_form_is_an_error(sandbox, task_folder, tmp_path):
+    """Guards: a task whose test module names its deliverable in a form grade()
+    can't redirect, graded anyway against /workspace: every check fails quietly
+    and the task looks impossible, where it should stop and say so."""
+    (task_folder / "tests" / "grading" / "test_verify.py").write_text(TEST_VERIFY.replace(
+        'OUTPUT_PATH = os.environ.get("WB_BENCH_OUTPUT_PATH", "/workspace/report.md")',
+        'OUTPUT_PATH = os.environ.get("WB_BENCH_OUTPUT_PATH", str(Path("/workspace") / "report.md"))'))
+    with pytest.raises(RuntimeError, match="where its checks look"):
+        grade(sandbox, task_folder, workspace_with(task_folder, tmp_path, {"report.md": "17"}))
+
+
+def test_checks_see_the_agents_final_reply(sandbox, task_folder, tmp_path):
+    """Guards: a task that checks the agent's final reply, which the benchmark's
+    runner saves as /workspace/final_answer.md, failing those checks on every
+    rollout because the grader never gives the reply to them."""
+    (task_folder / "tests" / "grading" / "test_verify.py").write_text(
+        "from pathlib import Path\n"
+        'reply = Path("/workspace/final_answer.md")\n'
+        'text = reply.read_text() if reply.exists() else ""\n'
+        '_CHECKS = [{"name": "reply_names_the_busiest_desk", "passed": "East desk" in text}]\n')
+    workspace = workspace_with(task_folder, tmp_path, {})
+    assert grade(sandbox, task_folder, workspace, final_reply="The busiest desk was East desk.").score == 1.0
 
 
 def test_an_agent_cannot_grade_itself(sandbox, task_folder, tmp_path):

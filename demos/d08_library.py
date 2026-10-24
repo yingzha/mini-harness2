@@ -10,6 +10,7 @@ A live run is kept under runs/demo_l8_<time>/:
   reflector/context/           exactly what the reflector saw: every candidate and run, and what was submitted
   library/                     the library after this task: index.md, entries/<task>/{harness/, EXPERIENCE.md}
   grade.md                     the delivered run's failed checks: for you only
+  usage.jsonl                  every model call's tokens and cost, by session
 """
 
 import random
@@ -39,7 +40,7 @@ stock, _ = load_harness(config.BASE_HARNESS_DIR)
 h0 = initial_harness(stock, workbuddy.REFERENCE)
 run_dir = config.RUNS_DIR / time.strftime("demo_l8_%Y%m%d-%H%M%S")
 library = run_dir / "library"   # a stream's library starts empty
-llm = LLM.from_env(config.LLM_SETTINGS)
+llm = LLM.from_env(config.LLM_SETTINGS, usage_log=run_dir / "usage.jsonl")
 sandbox = Sandbox.from_docker(config.SANDBOX)
 
 print(f"\nTask-level recursion at k = {k}, then the reflector (nothing prints until the end)...", flush=True)
@@ -57,7 +58,8 @@ if added:
 else:
     print("\nNothing added to the library: H★ is H0 and no lesson was supported.")
 
-g = workbuddy.grade(sandbox, folder, result.delivered.workspace)
+g = workbuddy.grade(sandbox, folder, result.delivered.workspace,
+                    final_reply=result.delivered.final_text)
 (run_dir / "grade.md").write_text("".join(f"- {c.name}: {c.detail}\n" for c in g.checks if not c.passed))
 print(f"For you only, never for the pipeline: the delivered output passed {sum(c.passed for c in g.checks)} "
       f"of {len(g.checks)} checks.")

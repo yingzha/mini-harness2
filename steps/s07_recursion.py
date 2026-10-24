@@ -114,7 +114,7 @@ def select(llm: LLM, system: str, task: Task, outputs: Mapping[str, ExecutionRec
 
     tools = [t for t in file_tools(session, session) if t.name != "write_file"]   # it only reads
     result = run_agent_loop(llm, "selector", system, "Begin with context/task.md.", tools,
-                            max_turns=max_turns, hooks=SendBackOnce(unreadable))
+                            session=str(session), max_turns=max_turns, hooks=SendBackOnce(unreadable))
     why = (m[1].strip() if (m := _WHY.search(result.final_text)) else "")
     if chosen := choice(result.final_text):
         return Selection(ids[chosen], ids, why, "", result.steps)

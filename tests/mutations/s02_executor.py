@@ -545,4 +545,16 @@ MUTATIONS = [
         ],
         "expect": None,
     },
+    {
+        "label": "a rollout's calls logged without its session",
+        "file": 'steps/s02_executor.py',
+        "replace": [('session=str(workspace), max_turns=limits.max_turns, hooks=hooks)', 'session="", max_turns=limits.max_turns, hooks=hooks)')],
+        "expect": 'test_every_call_in_a_stream_is_logged_under_its_own_session',
+    },
+    {
+        "label": 'the agent loop drops its session',
+        "file": 'steps/s02_executor.py',
+        "replace": [('llm.call(role, system, messages, definitions, session=session)', 'llm.call(role, system, messages, definitions)')],
+        "expect": 'test_every_call_in_a_stream_is_logged_under_its_own_session',
+    },
 ]

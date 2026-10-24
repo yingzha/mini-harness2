@@ -8,7 +8,7 @@ Each section below names the module and the paper sections it covers, says what 
 
 [steps/s00_llm.py](../steps/s00_llm.py) · paper: §2.1 the frozen model M, §3.1 roles, Fig. 6 compute
 
-The `LLM` gateway every later lesson receives: `llm.call(role, …)`, with an executor model and a stronger editor model, a thread-safe usage and cost meter, and retries for transient API errors.
+The `LLM` gateway every later lesson receives: `llm.call(role, …)`, with an executor model and a stronger editor model, a thread-safe usage and cost meter that can also log every call to a file, and retries for transient API errors.
 
 Try: `demos.d00_llm` (no API calls), then `--live`.
 
@@ -80,6 +80,6 @@ Try: `demos.d08_library` (no API calls), then `--live` (k = 1 plus the reflector
 
 [steps/s09_pipeline.py](../steps/s09_pipeline.py) · paper: §2.1 the stream, Fig. 3, §2.3 reuse, Table 1
 
-The whole loop over a stream of tasks: for each task, recursion from H₀ with the library as it stands, then reflection, then the library update. Only the library carries from one task to the next. The demo then scores the stream as in the paper's Table 1: H₀'s base runs against the delivered output. The scores are for you only; no model in the pipeline sees them.
+The whole loop over a stream of tasks: for each task, recursion from H₀ with the library as it stands, then reflection, then the library update. Only the library carries from one task to the next. The demo then scores the stream as in the paper's Table 1: H₀'s base runs against the delivered output, with the mean over the stream's tasks. The scores are for you only; no model in the pipeline sees them.
 
-Try: `demos.d09_pipeline` (no API calls), then `--live` (two tasks at k = 1: about $6, 30 to 60 minutes), or `--live --k 2` for roughly twice that. With one run per harness, the table it prints shows the mechanism, not a measured gain: the same harness run twice can differ by more than an edit's effect.
+Try: `demos.d09_pipeline` (no API calls), then `--live` (two tasks at k = 1: about $6, 30 to 60 minutes), or `--live --k 2` for roughly twice that. `--live --stream text-office` runs 14 tasks instead (likely $40 to $70 and 4 to 10 hours: only the two lesson tasks have been measured), and `--resume runs/demo_l9_<time>` carries on with a run that was cut short. With one run per harness, the table it prints shows the mechanism, not a measured gain: the same harness run twice can differ by more than an edit's effect.

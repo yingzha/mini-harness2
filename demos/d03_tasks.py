@@ -5,7 +5,8 @@
 
 Needs the task in data/ (see docs/running.md). A live run is kept
 under runs/demo_l3_<time>/: the task as the agent got it, the workspace, the
-trajectory, and grade.md. grade.md holds expected values, so it is for you:
+trajectory, usage.jsonl (every model call's tokens and cost) and grade.md.
+grade.md holds expected values, so it is for you:
 nothing in the pipeline may ever hand it to a model.
 """
 
@@ -49,12 +50,12 @@ if "--live" not in sys.argv[1:]:
     raise SystemExit
 
 run_dir = config.RUNS_DIR / time.strftime("demo_l3_%Y%m%d-%H%M%S")
-llm = LLM.from_env(config.LLM_SETTINGS)
+llm = LLM.from_env(config.LLM_SETTINGS, usage_log=run_dir / "usage.jsonl")
 print("\nRunning H0 on the task; this takes a minute or two and prints when it's done...", flush=True)
 files = write_task(task, run_dir / "task")
 record = execute(llm, sandbox, h0, task.prompt, files, run_dir / "workspace", config.ROLLOUT_LIMITS, label="h0")
 (run_dir / "h0.md").write_text(render_record(record))
-g = workbuddy.grade(sandbox, folder, record.workspace)
+g = workbuddy.grade(sandbox, folder, record.workspace, final_reply=record.final_text)
 (run_dir / "grade.md").write_text("\n".join(f"- [{'x' if c.passed else ' '}] {c.name}: {c.detail}" for c in g.checks))
 print(f"\nH0: {record.stop_reason} after {record.turns} turns, {record.tool_calls} tool calls "
       f"({record.tool_errors} errors); produced {', '.join(record.deliverable) or 'nothing'}")

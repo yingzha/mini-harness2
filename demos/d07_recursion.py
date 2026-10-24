@@ -12,6 +12,7 @@ A live run is kept under runs/demo_l7_<time>/:
   selection.md                its reasoning, and which run each id stood for
   adopted.diff                H★ against H0
   grade.md                    every run's failed checks: for you only
+  usage.jsonl                 every model call's tokens and cost, by session
 """
 
 import random
@@ -39,7 +40,7 @@ task = workbuddy.load_task(folder)
 stock, _ = load_harness(config.BASE_HARNESS_DIR)
 h0 = initial_harness(stock, workbuddy.REFERENCE)
 run_dir = config.RUNS_DIR / time.strftime("demo_l7_%Y%m%d-%H%M%S")
-llm = LLM.from_env(config.LLM_SETTINGS)
+llm = LLM.from_env(config.LLM_SETTINGS, usage_log=run_dir / "usage.jsonl")
 sandbox = Sandbox.from_docker(config.SANDBOX)
 
 print(f"\nParallel recursion at k = {k}: {k} runs of H0, {2 * k} editors, {2 * k} probes, {k} composers, "
@@ -65,7 +66,7 @@ if selection:
 print(f"\nH★ is the harness behind {result.chosen}" + (" (H0 itself)" if result.adopted == h0 else ""))
 
 runs = {**{r.label: r for r in result.step.refs}, **result.step.probes, **result.step.successors}
-grades = {label: workbuddy.grade(sandbox, folder, r.workspace) for label, r in runs.items()}
+grades = {label: workbuddy.grade(sandbox, folder, r.workspace, final_reply=r.final_text) for label, r in runs.items()}
 passed = {label: f"{sum(c.passed for c in g.checks)} of {len(g.checks)}" for label, g in grades.items()}
 (run_dir / "grade.md").write_text("\n\n".join(
     f"## {label}: {passed[label]} checks\n" + "".join(f"- {c.name}: {c.detail}\n" for c in g.checks if not c.passed)

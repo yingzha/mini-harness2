@@ -175,7 +175,7 @@ def edit_session(llm: LLM, role: str, system: str, harness: Harness, session: Pa
     if that is invalid or the session didn't finish."""
     harness_dir = session / "context" / "harness"
     result = run_agent_loop(llm, role, system, _START, editor_tools(session, harness_dir),
-                            max_turns=max_turns, hooks=SendBackOnce(lambda _: _invalid(harness_dir)))
+                            session=str(session), max_turns=max_turns, hooks=SendBackOnce(lambda _: _invalid(harness_dir)))
     proposed, dropped = load_harness(harness_dir)
     notes = next((m[1].strip() for s in reversed(result.steps) if (m := _NOTES.search(s.text))), "")
     if result.stop_reason != "end_turn":   # a half-made edit is not a proposal

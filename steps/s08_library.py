@@ -98,7 +98,7 @@ def reflect(llm: LLM, system: str, task: Task, harness: Harness, recursion: Recu
 
     tools = [t for t in file_tools(session, session) if t.name != "write_file"]   # it only reads
     result = run_agent_loop(llm, "reflector", system, "Begin with context/task.md.", tools,
-                            max_turns=max_turns, hooks=SendBackOnce(no_rows))
+                            session=str(session), max_turns=max_turns, hooks=SendBackOnce(no_rows))
     edits = m[1].strip() if (m := _EDITS.search(result.final_text)) else ""
     experience = m[1].strip() if (m := _EXPERIENCE.search(result.final_text)) else ""
     return Reflection(edits, experience, result.steps)

@@ -15,7 +15,9 @@ What this module gives the later lessons
 * `LLM`: the gateway to the model for every role. It owns the SDK client, the
   settings and a usage meter. Nothing here is global: an entry point builds one
   `LLM` per run and passes it to whatever needs a model.
-* `UsageMeter`: thread-safe, per-role token and dollar totals.
+* `UsageMeter`: thread-safe, per-role token and dollar totals, and, when given
+  a file, one JSON line per call, so a run's spending can be taken apart later
+  (by session, task and role; cache reads against writes; thinking).
 * `build_request`, `cost_of`, `text_of`, `workspace_headers`: pure functions,
   testable without a client.
 
@@ -30,10 +32,14 @@ Two API rules every later lesson relies on
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import threading
+import time
+import warnings
 from dataclasses import dataclass
-from typing import Any, Mapping
+from pathlib import Path
+from typing import Any, Callable, Mapping
 
 import anthropic
 from anthropic.types.beta import BetaMessage, BetaUsage
@@ -123,23 +129,44 @@ class RoleUsage:
 
 
 class UsageMeter:
-    """Per-role token/cost totals. Safe to share across threads (parallel probes)."""
+    """Per-role token/cost totals, and, if `log` is given, a JSON line per call
+    appended to it. Safe to share across threads (parallel probes)."""
 
-    def __init__(self, prices: Mapping[str, Price]) -> None:
+    def __init__(self, prices: Mapping[str, Price], log: Path | None = None, *,
+                 clock: Callable[[], float] = time.time) -> None:
         self._prices = prices
+        self._log = log
+        self._clock = clock
         self._lock = threading.Lock()
         self._by_role: dict[str, RoleUsage] = {}
 
-    def record(self, role: str, model: str, usage: BetaUsage) -> float:
+    def record(self, role: str, model: str, usage: BetaUsage, *, session: str = "", depth: int = 0) -> float:
+        """Add one response's usage. `session` names the session that made the
+        call (its folder); `depth` is how many messages the request held."""
         cost = cost_of(self._prices[model], usage)  # an unpriced model is a config bug
+        line = {"time": self._clock(), "session": session, "role": role, "model": model, "depth": depth,
+                "input": usage.input_tokens or 0,
+                "cache_read": usage.cache_read_input_tokens or 0,
+                "cache_write": usage.cache_creation_input_tokens or 0,
+                "output": usage.output_tokens or 0,
+                "thinking": usage.output_tokens_details.thinking_tokens if usage.output_tokens_details else None,
+                "cost": cost}
         with self._lock:
             r = self._by_role.setdefault(role, RoleUsage())
             r.calls += 1
-            r.input_tokens += usage.input_tokens or 0
-            r.output_tokens += usage.output_tokens or 0
-            r.cache_read_tokens += usage.cache_read_input_tokens or 0
-            r.cache_write_tokens += usage.cache_creation_input_tokens or 0
+            r.input_tokens += line["input"]
+            r.output_tokens += line["output"]
+            r.cache_read_tokens += line["cache_read"]
+            r.cache_write_tokens += line["cache_write"]
             r.cost_usd += cost
+            if self._log is not None:
+                try:
+                    self._log.parent.mkdir(parents=True, exist_ok=True)  # the run folder may not exist yet
+                    with self._log.open("a", encoding="utf-8") as log:
+                        log.write(json.dumps(line) + "\n")
+                except OSError as e:   # the call is paid for: losing its log line must not lose the run
+                    warnings.warn(f"usage log {self._log} can't be written ({e}); later calls are not logged")
+                    self._log = None
         return cost
 
     def snapshot(self) -> dict[str, RoleUsage]:
@@ -178,17 +205,21 @@ class LLM:
         self.meter = meter if meter is not None else UsageMeter(settings.prices)
 
     @classmethod
-    def from_env(cls, settings: LLMSettings) -> LLM:
+    def from_env(cls, settings: LLMSettings, usage_log: Path | None = None) -> LLM:
         """Real client. The SDK resolves credentials itself (ANTHROPIC_API_KEY, ...)
-        and retries transient errors (connection, rate limit, overload) with backoff."""
+        and retries transient errors (connection, rate limit, overload) with backoff.
+        Given `usage_log`, every call's usage is also appended to that file."""
         client = anthropic.Anthropic(default_headers=workspace_headers(os.environ), max_retries=settings.max_retries)
-        return cls(client, settings)
+        return cls(client, settings, UsageMeter(settings.prices, usage_log))
 
-    def call(self, role: str, system: str, messages: list, tools: list | None = None) -> BetaMessage:
+    def call(self, role: str, system: str, messages: list, tools: list | None = None, *,
+             session: str = "") -> BetaMessage:
+        """One request as `role`. `session` names the conversation it belongs to,
+        for the usage log."""
         request = build_request(self.settings, role, system, messages, tools)
         response = self.client.beta.messages.create(**request)
         # A server-side fallback may be served by another model; price it if we
         # know it, otherwise by the model we asked for.
         model = response.model if response.model in self.settings.prices else request["model"]
-        self.meter.record(role, model, response.usage)
+        self.meter.record(role, model, response.usage, session=session, depth=len(messages))
         return response

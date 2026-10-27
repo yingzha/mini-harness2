@@ -190,8 +190,9 @@ def file_tools(read_root: Path, write_root: Path) -> list[Tool]:
 
 WORKDIR = "/work"                        # where a sandbox sees the workspace
 SANDBOX_LABEL = "mini-harness2-sandbox"  # on every sandbox container; its value is the workspace
-_PYTHON = ("python", "-I", "-u")         # -I: ignore env and user site. -u: unbuffered, so
-                                         # what it printed before a timeout isn't lost
+_PYTHON = ("python", "-I", "-B", "-u")   # -I: ignore env and user site. -B: no __pycache__ in the
+                                         # deliverable (-I ignores PYTHONDONTWRITEBYTECODE). -u:
+                                         # unbuffered, so what it printed before a timeout isn't lost
 
 
 class SandboxError(RuntimeError):
@@ -602,20 +603,45 @@ def changed_files(workspace: Path, baseline: Mapping[str, str]) -> list[str]:
     return [path for path, digest in _digests(workspace).items() if baseline.get(path) != digest]
 
 
+def _scripts(harness: Harness) -> dict[str, str]:
+    return {path: text for path, text in harness.files.items()
+            if SCRIPT_FILE.fullmatch(path) or SKILL_SCRIPT.fullmatch(path)}
+
+
 def prepare_workspace(workspace: Path, files_dir: Path, harness: Harness) -> dict[str, str]:
     """A fresh workspace: the task's files at their own paths (where they are is
     up to the benchmark, and its reference instructions say so), plus the
     harness's scripts at theirs, so text that names them is right. Skill bodies
     and plugins stay out: they reach the agent only through tools and hooks.
+    The scripts leave again when the rollout ends (`remove_scripts`).
     Returns the starting state, to tell later what the agent produced."""
     if workspace.exists() and any(workspace.iterdir()):
         raise FileExistsError(f"{workspace} is not empty; every rollout starts fresh")
     shutil.copytree(files_dir, workspace, dirs_exist_ok=True)
-    for path, text in harness.files.items():
-        if SCRIPT_FILE.fullmatch(path) or SKILL_SCRIPT.fullmatch(path):
-            (workspace / path).parent.mkdir(parents=True, exist_ok=True)
-            (workspace / path).write_text(text, encoding="utf-8")
+    for path, text in _scripts(harness).items():
+        (workspace / path).parent.mkdir(parents=True, exist_ok=True)
+        (workspace / path).write_text(text, encoding="utf-8")
     return _digests(workspace)
+
+
+def remove_scripts(workspace: Path, files_dir: Path, harness: Harness) -> None:
+    """Take the harness's scripts out of a finished workspace, and the folders
+    that held only them, so it holds what it would if the harness lived
+    elsewhere: the task's files and the agent's work. A finished workspace is
+    what gets graded, and some tasks' checks fail on any script left in it. A
+    script the agent changed stays (the change is its work, and part of the
+    deliverable), and so does every folder the task itself shipped."""
+    for path, text in _scripts(harness).items():
+        placed = workspace / path
+        if placed.is_file() and placed.read_bytes() == text.encode("utf-8"):
+            placed.unlink()
+        for folder in placed.parents:
+            if folder == workspace or (files_dir / folder.relative_to(workspace)).is_dir():
+                break
+            if folder.is_dir():   # the agent may have deleted it
+                if any(folder.iterdir()):
+                    break
+                folder.rmdir()
 
 
 def execute(llm: LLM, sandbox: Sandbox, harness: Harness, task: str, files_dir: Path, workspace: Path,
@@ -629,6 +655,7 @@ def execute(llm: LLM, sandbox: Sandbox, harness: Harness, task: str, files_dir: 
     hooks = plugin_hooks(harness, sandbox, workspace, baseline, limits.tool_timeout_s)
     result = run_agent_loop(llm, "executor", harness.always_on_text(), task, tools,
                             session=str(workspace), max_turns=limits.max_turns, hooks=hooks)
+    remove_scripts(workspace, files_dir, harness)
     deliverable = {path: (workspace / path).read_text(encoding="utf-8", errors="replace")
                    for path in changed_files(workspace, baseline)}
     return ExecutionRecord(label, harness, result.steps, deliverable, result.final_text,

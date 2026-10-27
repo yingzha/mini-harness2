@@ -10,6 +10,7 @@ Each one follows from the same question: does the paper's rule guard a failure t
 - **No "template braces" rule.** The paper forbids `{{` and `{%` in always-on text because its runtime renders those files with Jinja. Ours doesn't template, so there is nothing to break.
 - **No frontmatter `name` or `mode: subagent`.** OpenCode needs them to load agents; our runtime finds skills and subagents by their folder. Only `description` is required, because the agent reads it to decide what to use.
 - **Skill helper scripts must be `.py`**, since `run_python` is the only way our executor runs code.
+- **The harness's scripts sit in the workspace while the agent runs**, at their own paths, so text that names `scripts/check.py` is right. When the rollout ends they are taken out again, with the folders only they needed, because the finished workspace is what gets graded and some Office tasks fail any stray script (two of the 14 did, on the first `text-office` stream). A script the agent changed stays, as part of what it produced.
 
 ## Tasks and evaluation
 

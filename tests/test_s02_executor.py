@@ -464,6 +464,48 @@ def test_execute_records_the_deliverable_and_stats(sandbox, tmp_path, source):
     assert "[ERROR]" in render_record(record)
 
 
+def test_a_finished_workspace_holds_the_agents_work_but_not_the_harness_scripts(sandbox, tmp_path, source):
+    """Guards: grading the harness's scripts as if the agent had left them. The
+    finished workspace is what gets graded, and some tasks fail any stray
+    script: on the 14-task Office stream, wechat-tech-topic-package-hardened
+    lost 2 checks and xiaohongshu-psychology-note-pack 1 that way, which H0,
+    shipping no scripts, never could. Also: deleting a script the agent changed
+    (its work, and in the deliverable), or a folder the task shipped."""
+    (source / "scripts").mkdir()   # the task's own, empty: it must still be there
+    harness = Harness({
+        **H0.files,
+        "guardrails.md": ("When parsing, load the `money` skill. When counting, load the `tally` skill. "
+                          "Finish with scripts/check.py.\n"),
+        "scripts/check.py": "print('ok')",
+        "skills/money/SKILL.md": "---\ndescription: d\n---\nRun skills/money/scripts/parse.py.",
+        "skills/money/scripts/parse.py": "print('parse')",
+        "skills/money/scripts/fmt.py": "print('fmt')",
+        "skills/tally/SKILL.md": "---\ndescription: d\n---\nRun skills/tally/scripts/count.py.",
+        "skills/tally/scripts/count.py": "print('count')",   # untouched: its folders must go too
+    })
+    llm, _ = scripted(
+        calls(tool_use("t1", "write_file", {"path": "skills/money/scripts/fmt.py", "content": "print('mine')"}),
+              tool_use("t2", "write_file", {"path": "report.md", "content": "# Report"})),
+        done())
+    record = execute(llm, sandbox, harness, "task", source, tmp_path / "ws", LIMITS, label="h1")
+    assert sorted(p.relative_to(record.workspace).as_posix() for p in record.workspace.rglob("*")) == [
+        "report.md", "scripts", "skills", "skills/money", "skills/money/scripts", "skills/money/scripts/fmt.py",
+        "source", "source/data.csv"]
+    assert record.deliverable == {"skills/money/scripts/fmt.py": "print('mine')", "report.md": "# Report"}
+
+
+def test_importing_its_own_module_leaves_no_bytecode_in_the_workspace(sandbox, tmp_path):
+    """Guards: a __pycache__ folder in the deliverable whenever the agent
+    imports a module it wrote (python -I ignores the image's
+    PYTHONDONTWRITEBYTECODE). On the Office stream, 75 KB of .pyc reached the
+    editors, composer and reflector of one task as deliverable files, and a
+    task's check for unexpected files would count them against the agent."""
+    (tmp_path / "helper.py").write_text("VALUE = 7\n")
+    code = "import sys; sys.path.insert(0, '.'); import helper; print(helper.VALUE)"
+    assert run_python_tool(sandbox, tmp_path, 30).run({"code": code}).output == "exit code 0\nstdout:\n7\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["helper.py"]
+
+
 def test_execute_refuses_an_invalid_harness(sandbox, tmp_path, source):
     """Guards: paying for a rollout of a harness that breaks the rules, or
     crashing halfway through setup with a confusing error."""

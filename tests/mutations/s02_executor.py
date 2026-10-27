@@ -171,8 +171,8 @@ MUTATIONS = [
         "label": "workspace gets skill text and plugins",
         "file": "steps/s02_executor.py",
         "replace": [
-            ("if SCRIPT_FILE.fullmatch(path) or SKILL_SCRIPT.fullmatch(path):",
-             "if True:"),
+            ("if SCRIPT_FILE.fullmatch(path) or SKILL_SCRIPT.fullmatch(path)}",
+             "if True}"),
         ],
         "expect": "test_workspace_has_inputs_and_scripts_but_not_skill_text_or_plugins",
     },
@@ -333,8 +333,8 @@ MUTATIONS = [
         "label": "output buffered, so it is lost at a timeout",
         "file": "steps/s02_executor.py",
         "replace": [
-            ("_PYTHON = (\"python\", \"-I\", \"-u\")",
-             "_PYTHON = (\"python\", \"-I\")"),
+            ("_PYTHON = (\"python\", \"-I\", \"-B\", \"-u\")",
+             "_PYTHON = (\"python\", \"-I\", \"-B\")"),
         ],
         "expect": "test_runaway_code_is_stopped_at_the_timeout_and_leaves_nothing_running",
     },
@@ -556,5 +556,49 @@ MUTATIONS = [
         "file": 'steps/s02_executor.py',
         "replace": [('llm.call(role, system, messages, definitions, session=session)', 'llm.call(role, system, messages, definitions)')],
         "expect": 'test_every_call_in_a_stream_is_logged_under_its_own_session',
+    },
+    {
+        "label": "the harness's scripts left in the graded workspace",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("    remove_scripts(workspace, files_dir, harness)\n",
+             ""),
+        ],
+        "expect": "test_a_finished_workspace_holds_the_agents_work_but_not_the_harness_scripts",
+    },
+    {
+        "label": "a script the agent changed is removed too",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("if placed.is_file() and placed.read_bytes() == text.encode(\"utf-8\"):",
+             "if placed.is_file():"),
+        ],
+        "expect": "test_a_finished_workspace_holds_the_agents_work_but_not_the_harness_scripts",
+    },
+    {
+        "label": "an empty folder the task shipped is removed with the scripts",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("if folder == workspace or (files_dir / folder.relative_to(workspace)).is_dir():",
+             "if folder == workspace:"),
+        ],
+        "expect": "test_a_finished_workspace_holds_the_agents_work_but_not_the_harness_scripts",
+    },
+    {
+        "label": "folders the scripts leave empty stay behind",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ("                folder.rmdir()\n",
+             "                break\n"),
+        ],
+        "expect": "test_a_finished_workspace_holds_the_agents_work_but_not_the_harness_scripts",
+    },
+    {
+        "label": "sandboxed Python writes bytecode into the workspace",
+        "file": "steps/s02_executor.py",
+        "replace": [
+            ('_PYTHON = ("python", "-I", "-B", "-u")', '_PYTHON = ("python", "-I", "-u")'),
+        ],
+        "expect": "test_importing_its_own_module_leaves_no_bytecode_in_the_workspace",
     },
 ]
